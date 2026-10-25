@@ -17,7 +17,18 @@ export function canViewRequest(actor: User, request: { requesterId: string }): b
   return isOps(actor) || request.requesterId === actor.id;
 }
 
-export function canAssign(actor: User): boolean {
+/**
+ * Whether `actor` may assign `request` to `assigneeId` (who must be on the Ops
+ * team; the service checks that). The Ops Lead can assign and reassign to
+ * anyone. Other Ops members can only take an unassigned request themselves,
+ * so there's a backup when the Lead is out.
+ */
+export function canAssign(actor: User, request: { assigneeId: string | null }, assigneeId: string): boolean {
+  if (isOpsLead(actor)) return true;
+  return actor.role === "ops" && request.assigneeId === null && assigneeId === actor.id;
+}
+
+export function canViewMetrics(actor: User): boolean {
   return isOpsLead(actor);
 }
 
@@ -59,8 +70,10 @@ export function requestActions(
   const closeReasons = transitions.includes("closed")
     ? CLOSE_REASONS.filter((reason) => canChangeStatus(actor, request, "closed", reason))
     : [];
+  const open = !isTerminal(request.status);
   return {
-    canAssign: canAssign(actor) && !isTerminal(request.status),
+    canAssign: isOpsLead(actor) && open,
+    canSelfAssign: open && request.assigneeId === null && canAssign(actor, request, actor.id),
     statusTransitions: transitions.filter((to) =>
       to === "closed" ? closeReasons.length > 0 : canChangeStatus(actor, request, to),
     ),

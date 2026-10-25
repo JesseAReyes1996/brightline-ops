@@ -11,7 +11,7 @@ import {
   type RequestView,
   type User,
 } from "@/src/lib/domain";
-import { isOps, isOpsLead } from "@/src/lib/permissions";
+import { canAssign, isOps, isOpsLead } from "@/src/lib/permissions";
 import { api, errorMessage, useApi } from "../_components/api";
 import { formatAge, StatusBadge } from "../_components/format";
 import { useSession } from "../_components/session";
@@ -21,7 +21,9 @@ export default function OpsQueuePage() {
   return (
     <>
       <h1>Ops queue</h1>
-      <UserGate opsOnly>{(me) => <Queue me={me} />}</UserGate>
+      <UserGate allow={isOps} denied="This page is only for the Ops team.">
+        {(me) => <Queue me={me} />}
+      </UserGate>
     </>
   );
 }
@@ -33,15 +35,18 @@ function Queue({ me }: { me: User }) {
     `/api/requests?view=queue${status ? `&status=${status}` : ""}`,
   );
   const [actionError, setActionError] = useState<string | null>(null);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
   const opsTeam = users.filter(isOps);
 
   async function assign(requestId: string, assigneeId: string) {
     setActionError(null);
+    setAssigningId(requestId);
     try {
       await api(`/api/requests/${requestId}/assign`, { body: { assigneeId } });
     } catch (err) {
       setActionError(errorMessage(err));
     }
+    setAssigningId(null);
     reload();
   }
 
@@ -93,12 +98,13 @@ function Queue({ me }: { me: User }) {
                     </span>
                   )}
                 </td>
-                <td>{r.accepted ? CATEGORY_LABELS[r.accepted.category] : <span className="muted">Not confirmed</span>}</td>
+                <td>{r.accepted ? CATEGORY_LABELS[r.accepted.category] : <span className="muted">Not reviewed</span>}</td>
                 <td>
                   {isOpsLead(me) ? (
                     <select
                       aria-label={`Assignee for ${r.title}`}
                       value={r.assigneeId ?? ""}
+                      disabled={assigningId === r.id}
                       onChange={(e) => void assign(r.id, e.target.value)}
                     >
                       {!r.assigneeId && (
@@ -114,6 +120,10 @@ function Queue({ me }: { me: User }) {
                     </select>
                   ) : r.assigneeId ? (
                     userName(r.assigneeId)
+                  ) : canAssign(me, r, me.id) ? (
+                    <button disabled={assigningId === r.id} onClick={() => void assign(r.id, me.id)}>
+                      Assign to me
+                    </button>
                   ) : (
                     <span className="muted">Unassigned</span>
                   )}

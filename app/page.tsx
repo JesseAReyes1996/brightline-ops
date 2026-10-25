@@ -50,7 +50,7 @@ function SubmitForm() {
           Submitted: <Link href={`/requests/${submitted.id}`}>{submitted.title}</Link>
           <br />
           {submitted.triage.suggestion
-            ? `AI triage suggests ${CATEGORY_LABELS[submitted.triage.suggestion.category]}, ${URGENCY_LABELS[submitted.triage.suggestion.urgency].toLowerCase()} urgency. The Ops team will confirm it.`
+            ? `AI triage suggests ${CATEGORY_LABELS[submitted.triage.suggestion.category]}, ${URGENCY_LABELS[submitted.triage.suggestion.urgency].toLowerCase()} urgency. The Ops team will review it.`
             : "AI triage didn't complete, so the Ops team will categorize it by hand."}
         </p>
       )}

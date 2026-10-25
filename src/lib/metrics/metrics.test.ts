@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { CloseReason, HistoryEvent, Status } from "../domain";
-import { aggregateMetrics, computeRequestMetrics } from "./index";
+import type { CloseReason, HistoryEvent, Status, TriageValues } from "../domain";
+import { aggregateMetrics, computeRequestMetrics, summarizeTriageReviews } from "./index";
 
 const MINUTE = 60_000;
 const START = new Date("2026-03-02T09:00:00Z").getTime();
@@ -141,7 +141,10 @@ describe("aggregateMetrics", () => {
     moved(doneAt, "in_progress", "done"),
   ];
 
-  it("groups by accepted category, falling back to untriaged, in the fixed category order", () => {
+  const group = (groups: ReturnType<typeof aggregateMetrics>, category: string) =>
+    groups.find((g) => g.category === category)!;
+
+  it("groups by accepted category, falling back to untriaged, and returns every group in a fixed order", () => {
     const groups = aggregateMetrics([
       { accepted: null, history: [created(0)] },
       { accepted: { category: "system_access" }, history: finished(10, 20, 30) },
@@ -150,27 +153,79 @@ describe("aggregateMetrics", () => {
     ]);
     expect(groups.map((g) => [g.category, g.requestCount])).toEqual([
       ["laptops_hardware", 1],
+      ["vendor_contracts", 0],
       ["system_access", 2],
+      ["office_facilities", 0],
+      ["other", 0],
       ["untriaged", 1],
     ]);
   });
 
   it("reports count, median, and average, skipping requests a metric doesn't apply to", () => {
-    const [group] = aggregateMetrics([
-      { accepted: { category: "other" }, history: finished(10, 20, 30) },
-      { accepted: { category: "other" }, history: finished(20, 30, 40) },
-      { accepted: { category: "other" }, history: finished(60, 70, 80) },
-      { accepted: { category: "other" }, history: [created(0), assigned(30, "dana")] }, // not picked up
-    ]);
-    expect(group.requestCount).toBe(4);
+    const other = group(
+      aggregateMetrics([
+        { accepted: { category: "other" }, history: finished(10, 20, 30) },
+        { accepted: { category: "other" }, history: finished(20, 30, 40) },
+        { accepted: { category: "other" }, history: finished(60, 70, 80) },
+        { accepted: { category: "other" }, history: [created(0), assigned(30, "dana")] }, // not picked up
+      ]),
+      "other",
+    );
+    expect(other.requestCount).toBe(4);
     // Time to assignment: 10, 20, 60, 30 → median of four is the mean of the middle two.
-    expect(group.timeToAssignment).toEqual({ count: 4, median: 25 * MINUTE, average: 30 * MINUTE });
+    expect(other.timeToAssignment).toEqual({ count: 4, median: 25 * MINUTE, average: 30 * MINUTE });
     // Handling: 10, 10, 10 from the three finished requests only.
-    expect(group.handlingTime).toEqual({ count: 3, median: 10 * MINUTE, average: 10 * MINUTE });
+    expect(other.handlingTime).toEqual({ count: 3, median: 10 * MINUTE, average: 10 * MINUTE });
   });
 
-  it("gives null median and average when no request in the group has a value", () => {
-    const [group] = aggregateMetrics([{ accepted: null, history: [created(0)] }]);
-    expect(group.timeToPickup).toEqual({ count: 0, median: null, average: null });
+  it("gives null median and average when no request in a group has a value, or the group is empty", () => {
+    const groups = aggregateMetrics([{ accepted: null, history: [created(0)] }]);
+    expect(group(groups, "untriaged").timeToPickup).toEqual({ count: 0, median: null, average: null });
+    expect(group(groups, "vendor_contracts")).toMatchObject({
+      requestCount: 0,
+      handlingTime: { count: 0, median: null, average: null },
+    });
+  });
+});
+
+describe("summarizeTriageReviews", () => {
+  const suggestion: TriageValues = { category: "system_access", urgency: "high", summary: "Needs a Salesforce login." };
+  const reviewed = (accepted: Partial<TriageValues>) => ({ triage: { suggestion }, accepted: { ...suggestion, ...accepted } });
+
+  it("reports the share accepted unchanged and the override rate per field", () => {
+    const stats = summarizeTriageReviews([
+      reviewed({}),
+      reviewed({}),
+      reviewed({}),
+      reviewed({ category: "other" }),
+      reviewed({ urgency: "low", summary: "Rewritten summary." }),
+      // Not counted: AI suggested but Ops hasn't confirmed yet.
+      { triage: { suggestion }, accepted: null },
+      // Not counted: AI triage failed and Ops classified it by hand.
+      { triage: { suggestion: null }, accepted: suggestion },
+    ]);
+    expect(stats).toEqual({
+      reviewed: 5,
+      acceptedUnchanged: 3,
+      acceptedUnchangedRate: 0.6,
+      overrides: {
+        category: { count: 1, rate: 0.2 },
+        urgency: { count: 1, rate: 0.2 },
+        summary: { count: 1, rate: 0.2 },
+      },
+    });
+  });
+
+  it("gives null rates when nothing has been reviewed", () => {
+    expect(summarizeTriageReviews([{ triage: { suggestion }, accepted: null }])).toEqual({
+      reviewed: 0,
+      acceptedUnchanged: 0,
+      acceptedUnchangedRate: null,
+      overrides: {
+        category: { count: 0, rate: null },
+        urgency: { count: 0, rate: null },
+        summary: { count: 0, rate: null },
+      },
+    });
   });
 });

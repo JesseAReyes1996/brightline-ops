@@ -1,6 +1,14 @@
 import type { Db, ObjectId } from "mongodb";
 import { requestsCollection } from "../collections";
-import { TRIAGE_FIELDS, type HistoryEvent, type RequestDetail, type TriageState, type TriageValues, type User } from "../domain";
+import {
+  TRIAGE_FIELDS,
+  overriddenTriageFields,
+  type HistoryEvent,
+  type RequestDetail,
+  type TriageState,
+  type TriageValues,
+  type User,
+} from "../domain";
 import { ServiceError } from "../errors";
 import { canManageTriage, isTriageRetryable } from "../permissions";
 import { runTriage, type TriageConfig } from "../triage";
@@ -85,8 +93,7 @@ export async function setAcceptedTriage(
     throw new ServiceError("invalid_input", "These triage values are already confirmed.");
   }
 
-  const suggestion = triage.suggestion;
-  const overriddenFields = TRIAGE_FIELDS.filter((field) => !suggestion || suggestion[field] !== values[field]);
+  const overriddenFields = overriddenTriageFields(triage.suggestion, values);
   const now = new Date();
   const event: HistoryEvent =
     overriddenFields.length === 0

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ROLE_LABELS } from "@/src/lib/domain";
-import { isOps } from "@/src/lib/permissions";
+import { isOps, isOpsLead } from "@/src/lib/permissions";
 import { useSession } from "./session";
 
 export function Header() {
@@ -14,6 +14,7 @@ export function Header() {
     { href: "/", label: "Submit a request" },
     { href: "/my-requests", label: "My requests" },
     ...(me && isOps(me) ? [{ href: "/ops", label: "Ops queue" }] : []),
+    ...(me && isOpsLead(me) ? [{ href: "/metrics", label: "Metrics" }] : []),
   ];
 
   return (

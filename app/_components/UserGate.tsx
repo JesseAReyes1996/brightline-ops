@@ -2,7 +2,6 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { User } from "@/src/lib/domain";
-import { isOps } from "@/src/lib/permissions";
 import { useSession } from "./session";
 
 /** "Loading…", plus an explanation if it takes long enough to look stuck. */
@@ -21,10 +20,19 @@ function SessionLoading() {
 }
 
 /**
- * Renders `children` with the current user once one is picked. This only
- * decides what to show; the API enforces the same rules on every call.
+ * Renders `children` with the current user once one is picked and `allow`
+ * passes. This only decides what to show; the API enforces the same rules on
+ * every call.
  */
-export function UserGate({ opsOnly = false, children }: { opsOnly?: boolean; children: (me: User) => ReactNode }) {
+export function UserGate({
+  allow,
+  denied = "You don't have access to this page.",
+  children,
+}: {
+  allow?: (user: User) => boolean;
+  denied?: string;
+  children: (me: User) => ReactNode;
+}) {
   const { loading, error, me } = useSession();
   if (loading) return <SessionLoading />;
   if (error) return <p className="error">{error}</p>;
@@ -35,6 +43,6 @@ export function UserGate({ opsOnly = false, children }: { opsOnly?: boolean; chi
       </p>
     );
   }
-  if (opsOnly && !isOps(me)) return <p>This page is only for the Ops team.</p>;
+  if (allow && !allow(me)) return <p>{denied}</p>;
   return <>{children(me)}</>;
 }

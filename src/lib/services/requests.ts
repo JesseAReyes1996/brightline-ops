@@ -53,7 +53,7 @@ export async function createRequest(
 }
 
 export async function assignRequest(db: Db, actor: User, id: string, input: AssignInput): Promise<RequestDetail> {
-  if (!canAssign(actor)) throw new ServiceError("forbidden", "Only the Ops Lead can assign requests.");
+  if (!isOps(actor)) throw new ServiceError("forbidden", "Only the Ops team can assign requests.");
   const doc = await loadRequest(db, id);
   if (isTerminal(doc.status)) {
     throw new ServiceError("invalid_transition", `This request is ${STATUS_LABELS[doc.status]} and can't be reassigned.`);
@@ -61,6 +61,19 @@ export async function assignRequest(db: Db, actor: User, id: string, input: Assi
   const assignee = await findUser(db, input.assigneeId);
   if (!assignee || !isOps(assignee)) {
     throw new ServiceError("invalid_input", "Requests can only be assigned to members of the Ops team.");
+  }
+  if (!canAssign(actor, doc, assignee.id)) {
+    // An Ops member who isn't the Lead failed one of two rules. Taking a
+    // request someone already has is a conflict, not a permission error:
+    // it's what the slower of two people racing to take a request gets.
+    if (doc.assigneeId) {
+      const current = await findUser(db, doc.assigneeId);
+      throw new ServiceError(
+        "conflict",
+        `This request is already assigned to ${current?.name ?? doc.assigneeId}. Only the Ops Lead can reassign it.`,
+      );
+    }
+    throw new ServiceError("forbidden", "You can only assign requests to yourself. The Ops Lead assigns them to others.");
   }
   if (doc.assigneeId === assignee.id) {
     throw new ServiceError("invalid_input", `This request is already assigned to ${assignee.name}.`);

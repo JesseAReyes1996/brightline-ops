@@ -10,13 +10,19 @@ export function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-/** Compact age such as "45m", "6h", or "3d 4h". */
-export function formatAge(sinceIso: string, now: number = Date.now()): string {
-  const minutes = Math.max(0, Math.floor((now - Date.parse(sinceIso)) / 60_000));
+/** A duration such as "45m", "5h 20m", or "2d 4h"; "—" when there is none. */
+export function formatDuration(ms: number | null): string {
+  if (ms === null) return "—";
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  if (hours < 24) return minutes % 60 ? `${hours}h ${minutes % 60}m` : `${hours}h`;
+  return hours % 24 ? `${Math.floor(hours / 24)}d ${hours % 24}h` : `${Math.floor(hours / 24)}d`;
+}
+
+/** How long ago `sinceIso` was, e.g. "3d 4h". */
+export function formatAge(sinceIso: string, now: number = Date.now()): string {
+  return formatDuration(now - Date.parse(sinceIso));
 }
 
 export function StatusBadge({ status, closeReason }: { status: Status; closeReason?: CloseReason | null }) {
@@ -35,6 +41,7 @@ export function describeEvent(event: HistoryEvent<string>, userName: (id: string
     case "created":
       return `${actor} submitted the request`;
     case "assigned": {
+      if (!event.fromAssigneeId && event.toAssigneeId === event.actorId) return `${actor} took it`;
       const to = event.toAssigneeId ? userName(event.toAssigneeId) : "nobody";
       return event.fromAssigneeId
         ? `${actor} reassigned it from ${userName(event.fromAssigneeId)} to ${to}`

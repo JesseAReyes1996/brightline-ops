@@ -10,13 +10,16 @@ import {
   TRIAGE_FIELDS,
   URGENCIES,
   URGENCY_LABELS,
+  overriddenTriageFields,
   type Category,
   type CloseReason,
   type RequestDetail,
   type RequestView,
   type Status,
+  type TriageField,
   type TriageValues,
   type Urgency,
+  type User,
 } from "@/src/lib/domain";
 import { isOps } from "@/src/lib/permissions";
 import { api, errorMessage, useApi } from "../../_components/api";
@@ -26,10 +29,10 @@ import { UserGate } from "../../_components/UserGate";
 
 export default function RequestPage() {
   const { id } = useParams<{ id: string }>();
-  return <UserGate>{() => <RequestDetailView id={id} />}</UserGate>;
+  return <UserGate>{(me) => <RequestDetailView id={id} me={me} />}</UserGate>;
 }
 
-function RequestDetailView({ id }: { id: string }) {
+function RequestDetailView({ id, me }: { id: string; me: User }) {
   const { userName } = useSession();
   const { data, error, reload } = useApi<RequestDetail>(`/api/requests/${id}`);
   const [busy, setBusy] = useState(false);
@@ -84,22 +87,30 @@ function RequestDetailView({ id }: { id: string }) {
           canRetry={actions.canRetryTriage}
           busy={busy}
           onRetry={() => act("triage", {})}
-          onConfirm={(values) => act("accepted", values)}
+          onSave={(values) => act("accepted", values)}
         />
       ) : (
         <TriageSummary request={request} />
       )}
 
-      {(actions.canAssign || actions.statusTransitions.length > 0) && (
+      {(actions.canAssign || actions.canSelfAssign || actions.statusTransitions.length > 0) && (
         <section className="stack">
           <h2>Actions</h2>
-          {actions.canAssign && (
+          {actions.canAssign ? (
             <AssignControl
               key={request.assigneeId}
               current={request.assigneeId}
               busy={busy}
               onAssign={(assigneeId) => act("assign", { assigneeId })}
             />
+          ) : (
+            actions.canSelfAssign && (
+              <p>
+                <button disabled={busy} onClick={() => act("assign", { assigneeId: me.id })}>
+                  Assign to me
+                </button>
+              </p>
+            )
           )}
           {actions.statusTransitions.length > 0 && (
             <StatusControls
@@ -114,13 +125,19 @@ function RequestDetailView({ id }: { id: string }) {
       )}
 
       <section>
-        <h2>History</h2>
+        <h2>
+          History <span className="muted small">newest first</span>
+        </h2>
+        {/* Display order only: the stored history stays oldest-first, which the metrics rely on. */}
         <ol className="timeline">
-          {request.history.map((event, i) => (
-            <li key={i}>
-              <time dateTime={event.at}>{formatDateTime(event.at)}</time> {describeEvent(event, userName)}
-            </li>
-          ))}
+          {request.history
+            .map((event, index) => ({ event, index }))
+            .reverse()
+            .map(({ event, index }) => (
+              <li key={index}>
+                <time dateTime={event.at}>{formatDateTime(event.at)}</time> {describeEvent(event, userName)}
+              </li>
+            ))}
         </ol>
       </section>
     </article>
@@ -128,44 +145,116 @@ function RequestDetailView({ id }: { id: string }) {
 }
 
 /**
- * Ops view: the requester's urgency, the AI suggestion, and the confirmed
- * values side by side. "Accept all" confirms the suggestion as is; editing the
- * Confirmed column and saving records an override. The server decides which
- * history event it was by comparing against the suggestion.
+ * Ops view: the AI suggestion (read-only) and the final triage Ops sets, as two
+ * separate things. Saving sends the final values; the server still decides
+ * whether that was an accept or an override by comparing with the suggestion.
  */
 function TriagePanel({
   request,
   canRetry,
   busy,
   onRetry,
-  onConfirm,
+  onSave,
 }: {
   request: RequestView;
   canRetry: boolean;
   busy: boolean;
   onRetry: () => void;
-  onConfirm: (values: TriageValues) => void;
+  onSave: (values: TriageValues) => void;
 }) {
-  const { triage, accepted, requesterUrgency } = request;
+  const { triage, accepted } = request;
   const suggestion = triage.suggestion;
-  const initial = accepted ?? suggestion;
-  const [category, setCategory] = useState<Category | "">(initial?.category ?? "");
-  const [urgency, setUrgency] = useState<Urgency | "">(initial?.urgency ?? "");
-  const [summary, setSummary] = useState(initial?.summary ?? "");
-  const suggestionAccepted =
-    accepted !== null && suggestion !== null && TRIAGE_FIELDS.every((field) => accepted[field] === suggestion[field]);
+  // With AI triage failed and nothing reviewed yet, the fields start open for triage by hand.
+  const handTriageNeeded = !accepted && triage.status === "failed";
+  const [editing, setEditing] = useState(handTriageNeeded);
 
   return (
     <section className="stack">
       <h2>Triage</h2>
+      <AiSuggestionPanel request={request} canRetry={canRetry} busy={busy} onRetry={onRetry} />
+
+      <div className="panel">
+        <h3>Final triage (set by Ops)</h3>
+        <p className="muted">{reviewStatus(suggestion, accepted)}</p>
+        {editing ? (
+          <TriageEditor
+            suggestion={suggestion}
+            current={accepted}
+            busy={busy}
+            onSave={onSave}
+            onCancel={handTriageNeeded ? undefined : () => setEditing(false)}
+          />
+        ) : accepted ? (
+          <>
+            <TriageValuesList values={accepted} suggestion={suggestion} />
+            <p>
+              <button disabled={busy} onClick={() => setEditing(true)}>
+                Edit
+              </button>
+            </p>
+          </>
+        ) : (
+          <p className="row">
+            {suggestion && (
+              <button disabled={busy} onClick={() => onSave(suggestion)}>
+                Accept AI suggestion
+              </button>
+            )}
+            <button disabled={busy} onClick={() => setEditing(true)}>
+              {suggestion ? "Edit before accepting" : "Triage by hand"}
+            </button>
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function reviewStatus(suggestion: TriageValues | null, accepted: TriageValues | null): string {
+  if (!accepted) return "Not reviewed yet";
+  if (!suggestion) return "Set by Ops (no AI suggestion)";
+  const edited = overriddenTriageFields(suggestion, accepted);
+  return edited.length === 0 ? "Accepted AI suggestion" : `Edited by Ops: ${edited.join(", ")}`;
+}
+
+function AiSuggestionPanel({
+  request,
+  canRetry,
+  busy,
+  onRetry,
+}: {
+  request: RequestView;
+  canRetry: boolean;
+  busy: boolean;
+  onRetry: () => void;
+}) {
+  const { triage, requesterUrgency } = request;
+  const suggestion = triage.suggestion;
+  return (
+    <div className="panel">
+      <h3>AI suggestion</h3>
       {triage.status === "complete" && (
-        <p className="muted">
-          AI suggestion from {triage.model}
-          {triage.attemptedAt && `, ${formatDateTime(triage.attemptedAt)}`}.
+        <p className="muted small">
+          From {triage.model}
+          {triage.attemptedAt && `, ${formatDateTime(triage.attemptedAt)}`}
         </p>
       )}
       {triage.status === "failed" && <p className="error">AI triage failed: {triage.error}</p>}
       {triage.status === "pending" && <p className="muted">AI triage is running…</p>}
+      {suggestion && (
+        <dl className="facts">
+          <dt>Category</dt>
+          <dd>{CATEGORY_LABELS[suggestion.category]}</dd>
+          <dt>Urgency</dt>
+          <dd>
+            <span className={suggestion.urgency !== requesterUrgency ? "differs" : undefined}>
+              Requester said {URGENCY_LABELS[requesterUrgency]} · AI suggests {URGENCY_LABELS[suggestion.urgency]}
+            </span>
+          </dd>
+          <dt>Summary</dt>
+          <dd>{suggestion.summary}</dd>
+        </dl>
+      )}
       {canRetry && (
         <p>
           <button disabled={busy} onClick={onRetry}>
@@ -173,89 +262,126 @@ function TriagePanel({
           </button>
         </p>
       )}
-
-      <table className="triage">
-        <thead>
-          <tr>
-            <th />
-            <th>Requester</th>
-            <th>AI suggestion</th>
-            <th>Confirmed {!accepted && <span className="muted">(not yet)</span>}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <th scope="row">Category</th>
-            <td className="muted">–</td>
-            <td>{suggestion ? CATEGORY_LABELS[suggestion.category] : "–"}</td>
-            <td>
-              <select aria-label="Confirmed category" value={category} onChange={(e) => setCategory(e.target.value as Category)}>
-                {category === "" && (
-                  <option value="" disabled>
-                    Pick one…
-                  </option>
-                )}
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {CATEGORY_LABELS[c]}
-                  </option>
-                ))}
-              </select>
-            </td>
-          </tr>
-          <tr>
-            <th scope="row">Urgency</th>
-            <td>{URGENCY_LABELS[requesterUrgency]}</td>
-            <td>{suggestion ? URGENCY_LABELS[suggestion.urgency] : "–"}</td>
-            <td>
-              <select aria-label="Confirmed urgency" value={urgency} onChange={(e) => setUrgency(e.target.value as Urgency)}>
-                {urgency === "" && (
-                  <option value="" disabled>
-                    Pick one…
-                  </option>
-                )}
-                {URGENCIES.map((u) => (
-                  <option key={u} value={u}>
-                    {URGENCY_LABELS[u]}
-                  </option>
-                ))}
-              </select>
-            </td>
-          </tr>
-          <tr>
-            <th scope="row">Summary</th>
-            <td className="muted">–</td>
-            <td>{suggestion?.summary ?? "–"}</td>
-            <td>
-              <input
-                aria-label="Confirmed summary"
-                value={summary}
-                onChange={(e) => setSummary(e.target.value)}
-                maxLength={SUMMARY_MAX_LENGTH}
-              />
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <p className="row">
-        {suggestion && (
-          <button disabled={busy || suggestionAccepted} onClick={() => onConfirm(suggestion)}>
-            {suggestionAccepted ? "AI suggestion accepted" : "Accept all"}
-          </button>
-        )}
-        <button
-          disabled={busy || category === "" || urgency === "" || summary.trim() === ""}
-          onClick={() => category && urgency && onConfirm({ category, urgency, summary })}
-        >
-          Save confirmed values
-        </button>
-      </p>
-    </section>
+    </div>
   );
 }
 
-/** Requester view: what Ops confirmed, or else the AI's suggestion. */
+const ChangedTag = () => <span className="tag">changed from AI</span>;
+
+/** Read-only final values, marking any that differ from the AI suggestion. */
+function TriageValuesList({ values, suggestion }: { values: TriageValues; suggestion: TriageValues | null }) {
+  const changed = (field: TriageField) => suggestion !== null && suggestion[field] !== values[field];
+  return (
+    <dl className="facts">
+      <dt>Category</dt>
+      <dd>
+        {CATEGORY_LABELS[values.category]} {changed("category") && <ChangedTag />}
+      </dd>
+      <dt>Urgency</dt>
+      <dd>
+        {URGENCY_LABELS[values.urgency]} {changed("urgency") && <ChangedTag />}
+      </dd>
+      <dt>Summary</dt>
+      <dd>
+        {values.summary} {changed("summary") && <ChangedTag />}
+      </dd>
+    </dl>
+  );
+}
+
+/** Fields for setting the final triage, starting from the current final values, else the AI's. */
+function TriageEditor({
+  suggestion,
+  current,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  suggestion: TriageValues | null;
+  current: TriageValues | null;
+  busy: boolean;
+  onSave: (values: TriageValues) => void;
+  onCancel?: () => void;
+}) {
+  const start = current ?? suggestion;
+  const [category, setCategory] = useState<Category | "">(start?.category ?? "");
+  const [urgency, setUrgency] = useState<Urgency | "">(start?.urgency ?? "");
+  const [summary, setSummary] = useState(start?.summary ?? "");
+
+  const values = category && urgency && summary.trim() ? { category, urgency, summary: summary.trim() } : null;
+  // Re-saving the values already in place would change nothing, so it's disabled.
+  const unchanged = values !== null && current !== null && TRIAGE_FIELDS.every((f) => values[f] === current[f]);
+  const changed = (field: TriageField, value: string) => suggestion !== null && value !== "" && suggestion[field] !== value;
+
+  return (
+    <form
+      className="stack"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (values && !unchanged) onSave(values);
+      }}
+    >
+      <label>
+        <span>Category {changed("category", category) && <ChangedTag />}</span>
+        <select aria-label="Final category" value={category} onChange={(e) => setCategory(e.target.value as Category)}>
+          {category === "" && (
+            <option value="" disabled>
+              Pick one…
+            </option>
+          )}
+          {CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {CATEGORY_LABELS[c]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Urgency {changed("urgency", urgency) && <ChangedTag />}</span>
+        <select aria-label="Final urgency" value={urgency} onChange={(e) => setUrgency(e.target.value as Urgency)}>
+          {urgency === "" && (
+            <option value="" disabled>
+              Pick one…
+            </option>
+          )}
+          {URGENCIES.map((u) => (
+            <option key={u} value={u}>
+              {URGENCY_LABELS[u]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span className="label-row">
+          <span>Summary {changed("summary", summary.trim()) && <ChangedTag />}</span>
+          <span className="muted small">
+            {summary.length}/{SUMMARY_MAX_LENGTH}
+          </span>
+        </span>
+        <textarea
+          aria-label="Final summary"
+          rows={2}
+          value={summary}
+          maxLength={SUMMARY_MAX_LENGTH}
+          // The summary must be one line, so line breaks (typed or pasted) become spaces.
+          onChange={(e) => setSummary(e.target.value.replace(/[\r\n]+/g, " "))}
+        />
+      </label>
+      <p className="row">
+        <button type="submit" disabled={busy || !values || unchanged}>
+          Save final values
+        </button>
+        {onCancel && (
+          <button type="button" disabled={busy} onClick={onCancel}>
+            Cancel
+          </button>
+        )}
+      </p>
+    </form>
+  );
+}
+
+/** Requester view: the final triage once Ops has reviewed it, otherwise the AI's suggestion. */
 function TriageSummary({ request }: { request: RequestView }) {
   const { triage, accepted } = request;
   return (
@@ -263,20 +389,24 @@ function TriageSummary({ request }: { request: RequestView }) {
       <h2>Triage</h2>
       {accepted ? (
         <p>
+          <span className="muted">Reviewed by Ops:</span>
+          <br />
           {CATEGORY_LABELS[accepted.category]} · {URGENCY_LABELS[accepted.urgency]} urgency
           <br />
           {accepted.summary}
         </p>
       ) : triage.suggestion ? (
         <p>
-          <span className="muted">AI suggestion, not yet confirmed by Ops:</span>
+          <span className="muted">AI suggestion, not yet reviewed by Ops:</span>
           <br />
           {CATEGORY_LABELS[triage.suggestion.category]} · {URGENCY_LABELS[triage.suggestion.urgency]} urgency
           <br />
           {triage.suggestion.summary}
         </p>
       ) : (
-        <p className="muted">{triage.status === "failed" ? "AI triage failed." : "AI triage pending."}</p>
+        <p className="muted">
+          {triage.status === "failed" ? "Not triaged yet. The Ops team will review it." : "AI triage is running."}
+        </p>
       )}
     </section>
   );

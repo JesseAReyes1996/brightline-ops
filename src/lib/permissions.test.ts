@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TriageState, User } from "./domain";
-import { canChangeStatus, isTriageRetryable, requestActions } from "./permissions";
+import { canAssign, canChangeStatus, canViewMetrics, isTriageRetryable, requestActions } from "./permissions";
 
 const priya: User = { id: "priya", name: "Priya", role: "ops_lead" };
 const marcus: User = { id: "marcus", name: "Marcus", role: "ops" };
@@ -35,6 +35,42 @@ describe("canChangeStatus", () => {
 
   it("lets an Ops member cancel a request they submitted", () => {
     expect(canChangeStatus(dana, { requesterId: "dana", assigneeId: "marcus" }, "closed", "cancelled_by_requester")).toBe(true);
+  });
+});
+
+describe("canAssign", () => {
+  const unassigned = { assigneeId: null };
+  const marcusHasIt = { assigneeId: "marcus" };
+
+  it("lets an Ops member assign an unassigned request to themselves", () => {
+    expect(canAssign(marcus, unassigned, "marcus")).toBe(true);
+  });
+
+  it("doesn't let an Ops member assign a request to someone else", () => {
+    expect(canAssign(marcus, unassigned, "dana")).toBe(false);
+    expect(canAssign(marcus, unassigned, "priya")).toBe(false);
+  });
+
+  it("doesn't let an Ops member take or hand off a request that's already assigned", () => {
+    expect(canAssign(dana, marcusHasIt, "dana")).toBe(false);
+    expect(canAssign(marcus, marcusHasIt, "dana")).toBe(false);
+  });
+
+  it("lets the Ops Lead assign and reassign to anyone", () => {
+    expect(canAssign(priya, unassigned, "dana")).toBe(true);
+    expect(canAssign(priya, marcusHasIt, "dana")).toBe(true);
+    expect(canAssign(priya, marcusHasIt, "priya")).toBe(true);
+  });
+
+  it("doesn't let a requester assign anything", () => {
+    expect(canAssign(sam, unassigned, "sam")).toBe(false);
+    expect(canAssign(sam, unassigned, "marcus")).toBe(false);
+  });
+});
+
+describe("canViewMetrics", () => {
+  it("is only for the Ops Lead", () => {
+    expect([priya, marcus, sam].map(canViewMetrics)).toEqual([true, false, false]);
   });
 });
 
@@ -73,8 +109,17 @@ describe("requestActions", () => {
   it("offers nothing on a finished request", () => {
     expect(requestActions(priya, { ...request, status: "done", triage })).toMatchObject({
       canAssign: false,
+      canSelfAssign: false,
       statusTransitions: [],
       closeReasons: [],
     });
+  });
+
+  it("offers an Ops member self-assignment only while the request is unassigned and open", () => {
+    const unassigned = { ...request, assigneeId: null, status: "new" as const, triage };
+    expect(requestActions(dana, unassigned)).toMatchObject({ canAssign: false, canSelfAssign: true });
+    expect(requestActions(dana, { ...unassigned, assigneeId: "marcus" })).toMatchObject({ canSelfAssign: false });
+    expect(requestActions(dana, { ...unassigned, status: "closed" })).toMatchObject({ canSelfAssign: false });
+    expect(requestActions(sam, unassigned)).toMatchObject({ canSelfAssign: false });
   });
 });

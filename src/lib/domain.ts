@@ -87,6 +87,11 @@ export type TriageField = keyof TriageValues;
 export const TRIAGE_FIELDS: readonly TriageField[] = ["category", "urgency", "summary"];
 export const SUMMARY_MAX_LENGTH = 140;
 
+/** Fields where the confirmed values differ from the AI suggestion; all of them when there was no suggestion. */
+export function overriddenTriageFields(suggestion: TriageValues | null, confirmed: TriageValues): TriageField[] {
+  return TRIAGE_FIELDS.filter((field) => !suggestion || suggestion[field] !== confirmed[field]);
+}
+
 // The shapes below are generic over the date type `D`: `Date` in the stored
 // Mongo document, ISO `string` once a service has serialized it for the API.
 
@@ -134,7 +139,10 @@ export type RequestView = RequestFields<string> & { id: string };
 
 /** What the current user may do to a request, so the UI doesn't re-derive the rules. */
 export interface RequestActions {
+  /** Assign or reassign to anyone on the Ops team (Ops Lead). */
   canAssign: boolean;
+  /** Take this unassigned request yourself. */
+  canSelfAssign: boolean;
   statusTransitions: Status[];
   /** Reasons this user may pick when closing; empty when they can't close. */
   closeReasons: CloseReason[];
