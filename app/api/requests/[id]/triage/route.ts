@@ -4,6 +4,9 @@ import { retryTriage } from "@/src/lib/services/triage";
 import { triageConfigFromEnv } from "@/src/lib/triage";
 import { handle, requireUser } from "@/app/api/_lib/http";
 
+// Waits on AI triage (up to its 15s timeout); see app/api/requests/route.ts.
+export const maxDuration = 60;
+
 /** Retries AI triage (Ops and Ops Lead only). */
 export async function POST(req: NextRequest, ctx: RouteContext<"/api/requests/[id]/triage">) {
   return handle(async () => {

@@ -1,6 +1,6 @@
 ## How to run
 
-Requires Node.js 20.9 or later.
+Requires Node.js 22.12 or later (Node 24 recommended).
 
 1. Install dependencies:
 
