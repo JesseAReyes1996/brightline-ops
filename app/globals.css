@@ -166,8 +166,106 @@ button:disabled {
 
 .metrics-table th,
 .metrics-table td {
-  padding: 0.4rem 0.45rem;
   white-space: nowrap;
+}
+
+/* Metrics: headline numbers */
+.headlines {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.75rem;
+}
+
+.headline {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+
+.headline-label {
+  font-weight: 600;
+}
+
+.headline-value {
+  font-size: 1.6rem;
+  font-weight: 600;
+}
+
+/* Tooltips: a definition behind an "i" button, or details behind a value */
+.tip-host {
+  position: relative;
+  display: inline-block;
+}
+
+.tip {
+  display: none;
+  position: absolute;
+  z-index: 10;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 15rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  background: var(--foreground);
+  color: var(--background);
+  font-size: 0.8rem;
+  font-weight: normal;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+}
+
+.tip.below {
+  top: calc(100% + 4px);
+}
+
+.tip.above {
+  bottom: calc(100% + 4px);
+}
+
+.tip.end {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.info.open .tip,
+.info-button:focus-visible + .tip,
+.stat:focus .tip {
+  display: block;
+}
+
+/* Only devices with a real pointer get hover, so a tap on a phone doesn't leave a tooltip stuck open. */
+@media (hover: hover) {
+  .info:hover .tip,
+  .stat:hover .tip {
+    display: block;
+  }
+}
+
+/* Escape hides a tooltip until focus or the pointer moves away. Must stay after the rules above. */
+.tip-host.dismissed .tip {
+  display: none;
+}
+
+.info-button {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-left: 0.3rem;
+  padding: 0;
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  font: italic 600 0.7rem/1 Georgia, serif;
+  vertical-align: middle;
+  cursor: help;
+}
+
+.stat {
+  border-bottom: 1px dotted var(--muted);
+  cursor: help;
 }
 
 table.narrow {
