@@ -47,11 +47,11 @@ function SubmitForm() {
     <form className="stack" onSubmit={onSubmit}>
       {submitted && (
         <p className="notice">
-          Submitted: <Link href={`/requests/${submitted.id}`}>{submitted.title}</Link>
-          <br />
           {submitted.triage.suggestion
-            ? `AI triage suggests ${CATEGORY_LABELS[submitted.triage.suggestion.category]}, ${URGENCY_LABELS[submitted.triage.suggestion.urgency].toLowerCase()} urgency. The Ops team will review it.`
-            : "AI triage didn't complete, so the Ops team will categorize it by hand."}
+            ? `Submitted. AI triage suggests ${CATEGORY_LABELS[submitted.triage.suggestion.category]}, ${URGENCY_LABELS[submitted.triage.suggestion.urgency].toLowerCase()} urgency. The Ops team will review it.`
+            : "Submitted. The Ops team will review it."}
+          <br />
+          <Link href={`/requests/${submitted.id}`}>View “{submitted.title}”</Link>
         </p>
       )}
       {error && <p className="error">{error}</p>}

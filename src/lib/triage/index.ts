@@ -4,8 +4,12 @@ import { callTriageModel } from "./call";
 import { parseTriageResponse } from "./parse";
 import { buildTriagePrompt } from "./prompt";
 
-export const DEFAULT_TRIAGE_MODEL = "claude-haiku-5-5";
+const DEFAULT_TRIAGE_MODEL = "claude-haiku-5-5";
 const TRIAGE_TIMEOUT_MS = 15_000;
+// Decides which calendar day "today" is in the prompt. UTC is what Vercel's
+// servers use, and it keeps local and hosted runs identical. Change it to an
+// IANA zone such as "America/Chicago" to use the company's local day.
+const TRIAGE_TIME_ZONE = "UTC";
 
 export interface TriageConfig {
   apiKey: string | undefined;
@@ -21,7 +25,7 @@ export function triageConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Triag
   };
 }
 
-export type TriageResult = { status: "complete"; suggestion: TriageValues } | { status: "failed"; error: string };
+type TriageResult = { status: "complete"; suggestion: TriageValues } | { status: "failed"; error: string };
 
 /**
  * Classifies one request. Never throws: a missing key, a timeout, an API
@@ -36,7 +40,10 @@ export async function runTriage(
 
   let response: Anthropic.Message;
   try {
-    response = await callTriageModel({ ...config, apiKey: config.apiKey }, buildTriagePrompt(input));
+    response = await callTriageModel(
+      { ...config, apiKey: config.apiKey },
+      buildTriagePrompt(input, new Date(), TRIAGE_TIME_ZONE),
+    );
   } catch (err) {
     return { status: "failed", error: describeCallError(err, config.timeoutMs) };
   }

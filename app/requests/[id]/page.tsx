@@ -8,6 +8,7 @@ import {
   CLOSE_REASON_LABELS,
   SUMMARY_MAX_LENGTH,
   TRIAGE_FIELDS,
+  UPDATE_NOTE_MAX_LENGTH,
   URGENCIES,
   URGENCY_LABELS,
   overriddenTriageFields,
@@ -22,6 +23,7 @@ import {
   type User,
 } from "@/src/lib/domain";
 import { isOps } from "@/src/lib/permissions";
+import { isTerminal } from "@/src/lib/transitions";
 import { api, errorMessage, useApi } from "../../_components/api";
 import { describeEvent, formatDateTime, StatusBadge } from "../../_components/format";
 import { useSession } from "../../_components/session";
@@ -80,10 +82,16 @@ function RequestDetailView({ id, me }: { id: string; me: User }) {
         <p className="prewrap">{request.description}</p>
       </section>
 
-      {actions.canManageTriage ? (
+      {isOps(me) ? (
         <TriagePanel
           key={request.updatedAt}
           request={request}
+          canReview={actions.canReviewTriage}
+          lockedNote={
+            isTerminal(request.status)
+              ? "Only the Ops Lead can change the triage of a finished request."
+              : `Only ${request.assigneeId ? userName(request.assigneeId) : "the assignee"} or the Ops Lead can change this request's triage.`
+          }
           canRetry={actions.canRetryTriage}
           busy={busy}
           onRetry={() => act("triage", {})}
@@ -117,8 +125,9 @@ function RequestDetailView({ id, me }: { id: string; me: User }) {
               from={request.status}
               transitions={actions.statusTransitions}
               closeReasons={actions.closeReasons}
+              sendBackNeedsUpdate={actions.sendBackNeedsUpdate}
               busy={busy}
-              onChange={(status, closeReason) => act("status", { status, closeReason })}
+              onChange={(status, closeReason, note) => act("status", { status, closeReason, note })}
             />
           )}
         </section>
@@ -136,6 +145,7 @@ function RequestDetailView({ id, me }: { id: string; me: User }) {
             .map(({ event, index }) => (
               <li key={index}>
                 <time dateTime={event.at}>{formatDateTime(event.at)}</time> {describeEvent(event, userName)}
+                {event.detail?.note && <p className="note prewrap">{event.detail.note}</p>}
               </li>
             ))}
         </ol>
@@ -151,12 +161,17 @@ function RequestDetailView({ id, me }: { id: string; me: User }) {
  */
 function TriagePanel({
   request,
+  canReview,
+  lockedNote,
   canRetry,
   busy,
   onRetry,
   onSave,
 }: {
   request: RequestView;
+  /** False shows the triage read-only, with `lockedNote` saying who can change it. */
+  canReview: boolean;
+  lockedNote: string;
   canRetry: boolean;
   busy: boolean;
   onRetry: () => void;
@@ -165,7 +180,7 @@ function TriagePanel({
   const { triage, accepted } = request;
   const suggestion = triage.suggestion;
   // With AI triage failed and nothing reviewed yet, the fields start open for triage by hand.
-  const handTriageNeeded = !accepted && triage.status === "failed";
+  const handTriageNeeded = canReview && !accepted && triage.status === "failed";
   const [editing, setEditing] = useState(handTriageNeeded);
 
   return (
@@ -176,7 +191,12 @@ function TriagePanel({
       <div className="panel">
         <h3>Final triage (set by Ops)</h3>
         <p className="muted">{reviewStatus(suggestion, accepted)}</p>
-        {editing ? (
+        {!canReview ? (
+          <>
+            {accepted && <TriageValuesList values={accepted} suggestion={suggestion} />}
+            <p className="muted small">{lockedNote}</p>
+          </>
+        ) : editing ? (
           <TriageEditor
             suggestion={suggestion}
             current={accepted}
@@ -449,28 +469,32 @@ function StatusControls({
   from,
   transitions,
   closeReasons,
+  sendBackNeedsUpdate,
   busy,
   onChange,
 }: {
   from: Status;
   transitions: Status[];
   closeReasons: CloseReason[];
+  /** The requester's move back to In progress, which needs their update. */
+  sendBackNeedsUpdate: boolean;
   busy: boolean;
-  onChange: (status: Status, closeReason?: CloseReason) => void;
+  onChange: (status: Status, closeReason?: CloseReason, note?: string) => void;
 }) {
   const [closeReason, setCloseReason] = useState<CloseReason | "">("");
   const [confirmingCancel, setConfirmingCancel] = useState(false);
-  const moves = transitions.filter((s) => s !== "closed");
+  const moves = transitions.filter((s) => s !== "closed" && !(s === "in_progress" && sendBackNeedsUpdate));
   const buttonLabel: Partial<Record<Status, string>> = {
     in_progress: from === "waiting_on_requester" ? "Resume work" : "Start work",
     waiting_on_requester: "Wait on requester",
     done: "Mark done",
   };
-  // A requester's only status action is cancelling their own request.
+  // A requester's only way to close is cancelling their own request.
   const cancelOnly = closeReasons.length === 1 && closeReasons[0] === "cancelled_by_requester";
 
   return (
     <>
+      {sendBackNeedsUpdate && <SendBackForm busy={busy} onSend={(note) => onChange("in_progress", undefined, note)} />}
       {moves.length > 0 && (
         <p className="row">
           {moves.map((s) => (
@@ -519,5 +543,41 @@ function StatusControls({
         </p>
       )}
     </>
+  );
+}
+
+/** For the requester while Ops waits on them: their update, which goes into the history. */
+function SendBackForm({ busy, onSend }: { busy: boolean; onSend: (note: string) => void }) {
+  const [note, setNote] = useState("");
+  return (
+    <form
+      className="stack"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (note.trim()) onSend(note.trim());
+      }}
+    >
+      <p className="muted">The Ops team is waiting on you. Reply here to send the request back to them.</p>
+      <label>
+        <span className="label-row">
+          <span>What&apos;s your update?</span>
+          <span className="muted small">
+            {note.length}/{UPDATE_NOTE_MAX_LENGTH}
+          </span>
+        </span>
+        <textarea
+          rows={4}
+          value={note}
+          maxLength={UPDATE_NOTE_MAX_LENGTH}
+          required
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </label>
+      <p>
+        <button type="submit" disabled={busy || !note.trim()}>
+          Send back to Ops
+        </button>
+      </p>
+    </form>
   );
 }

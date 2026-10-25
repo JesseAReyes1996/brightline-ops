@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { overriddenTriageFields, type Status, type User } from "./domain";
-import { canAssign, canChangeStatus } from "./permissions";
+import { canAssign, canChangeStatus, canReviewTriage, sendBackNeedsUpdate } from "./permissions";
 import { buildSeedRequests, SEED_USERS } from "./seed";
 import { checkTransition } from "./transitions";
 
@@ -30,10 +30,15 @@ describe("seed data", () => {
       }
       if (event.type === "status_changed") {
         const { toStatus, detail } = event;
+        const current = { requesterId: request.requesterId, assigneeId, status };
         expect(event.fromStatus).toBe(status);
-        expect(checkTransition({ status, assigneeId }, toStatus!, detail?.closeReason)).toEqual({ ok: true });
-        expect(canChangeStatus(actor!, { requesterId: request.requesterId, assigneeId }, toStatus!, detail?.closeReason)).toBe(true);
+        expect(checkTransition(current, toStatus!, detail?.closeReason)).toEqual({ ok: true });
+        expect(canChangeStatus(actor!, current, toStatus!, detail?.closeReason)).toBe(true);
+        if (sendBackNeedsUpdate(actor!, current, toStatus!)) expect(detail?.note).toBeTruthy();
         status = toStatus!;
+      }
+      if (event.type === "triage_accepted" || event.type === "triage_overridden") {
+        expect(canReviewTriage(actor!, { status, assigneeId })).toBe(true);
       }
     }
 
@@ -41,13 +46,13 @@ describe("seed data", () => {
     expect(request.assigneeId).toBe(assigneeId);
     expect(request.updatedAt).toEqual(request.history.at(-1)!.at);
 
-    const confirmation = request.history.findLast((e) => e.type === "triage_accepted" || e.type === "triage_overridden");
+    const review = request.history.findLast((e) => e.type === "triage_accepted" || e.type === "triage_overridden");
     if (request.accepted) {
       const overridden = overriddenTriageFields(request.triage.suggestion, request.accepted);
-      expect(confirmation?.type).toBe(overridden.length ? "triage_overridden" : "triage_accepted");
-      expect(confirmation?.detail?.overriddenFields).toEqual(overridden.length ? overridden : undefined);
+      expect(review?.type).toBe(overridden.length ? "triage_overridden" : "triage_accepted");
+      expect(review?.detail?.overriddenFields).toEqual(overridden.length ? overridden : undefined);
     } else {
-      expect(confirmation).toBeUndefined();
+      expect(review).toBeUndefined();
     }
   });
 

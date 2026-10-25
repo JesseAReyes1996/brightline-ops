@@ -4,14 +4,15 @@ import Link from "next/link";
 import { useState } from "react";
 import {
   CATEGORY_LABELS,
-  OPEN_STATUSES,
+  STATUSES,
   STATUS_LABELS,
   URGENCY_LABELS,
-  type OpenStatus,
   type RequestView,
+  type Status,
   type User,
 } from "@/src/lib/domain";
 import { canAssign, isOps, isOpsLead } from "@/src/lib/permissions";
+import { isTerminal } from "@/src/lib/transitions";
 import { api, errorMessage, useApi } from "../_components/api";
 import { formatAge, StatusBadge } from "../_components/format";
 import { useSession } from "../_components/session";
@@ -30,7 +31,8 @@ export default function OpsQueuePage() {
 
 function Queue({ me }: { me: User }) {
   const { users, userName } = useSession();
-  const [status, setStatus] = useState<OpenStatus | "">("");
+  // "" is the default: open requests only.
+  const [status, setStatus] = useState<Status | "all" | "">("");
   const { data, error, loading, reload } = useApi<{ requests: RequestView[] }>(
     `/api/requests?view=queue${status ? `&status=${status}` : ""}`,
   );
@@ -55,20 +57,21 @@ function Queue({ me }: { me: User }) {
       <p>
         <label>
           Status{" "}
-          <select value={status} onChange={(e) => setStatus(e.target.value as OpenStatus | "")}>
+          <select value={status} onChange={(e) => setStatus(e.target.value as Status | "all" | "")}>
             <option value="">All open</option>
-            {OPEN_STATUSES.map((s) => (
+            {STATUSES.map((s) => (
               <option key={s} value={s}>
                 {STATUS_LABELS[s]}
               </option>
             ))}
+            <option value="all">All</option>
           </select>
         </label>{" "}
         {loading && <span className="muted">Loading…</span>}
       </p>
       {error && <p className="error">{error}</p>}
       {actionError && <p className="error">{actionError}</p>}
-      {data && data.requests.length === 0 && <p>Nothing in the queue.</p>}
+      {data && data.requests.length === 0 && <p>No requests match this filter.</p>}
       {data && data.requests.length > 0 && (
         <table>
           <thead>
@@ -100,7 +103,10 @@ function Queue({ me }: { me: User }) {
                 </td>
                 <td>{r.accepted ? CATEGORY_LABELS[r.accepted.category] : <span className="muted">Not reviewed</span>}</td>
                 <td>
-                  {isOpsLead(me) ? (
+                  {isTerminal(r.status) ? (
+                    // Finished requests can't be reassigned.
+                    r.assigneeId ? userName(r.assigneeId) : <span className="muted">Unassigned</span>
+                  ) : isOpsLead(me) ? (
                     <select
                       aria-label={`Assignee for ${r.title}`}
                       value={r.assigneeId ?? ""}
@@ -129,7 +135,7 @@ function Queue({ me }: { me: User }) {
                   )}
                 </td>
                 <td>
-                  <StatusBadge status={r.status} />
+                  <StatusBadge status={r.status} closeReason={r.closeReason} />
                 </td>
                 <td className="nowrap">{formatAge(r.createdAt)}</td>
               </tr>

@@ -4,7 +4,7 @@ import { CATEGORIES, URGENCIES, type TriageValues } from "../domain";
 import { formatIssues, triageSummarySchema } from "../validation";
 import { TRIAGE_TOOL_NAME } from "./prompt";
 
-export type TriageParseResult = { ok: true; suggestion: TriageValues } | { ok: false; error: string };
+type TriageParseResult = { ok: true; suggestion: TriageValues } | { ok: false; error: string };
 
 const notAllowed = (field: string) => (issue: { input?: unknown }) =>
   issue.input === undefined ? "missing" : `${JSON.stringify(issue.input)} is not an allowed ${field}`;

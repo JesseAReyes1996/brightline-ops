@@ -12,7 +12,7 @@ export function isTerminal(status: Status): boolean {
   return ALLOWED_TRANSITIONS[status].length === 0;
 }
 
-export type TransitionCheck = { ok: true } | { ok: false; reason: string };
+type TransitionCheck = { ok: true } | { ok: false; reason: string };
 
 /**
  * Decides whether `request` may move to `to`. Pure, so it is the single

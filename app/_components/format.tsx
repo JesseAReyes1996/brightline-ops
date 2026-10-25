@@ -27,7 +27,7 @@ export function formatAge(sinceIso: string, now: number = Date.now()): string {
 
 export function StatusBadge({ status, closeReason }: { status: Status; closeReason?: CloseReason | null }) {
   return (
-    <span className={`badge status-${status}`}>
+    <span className="badge">
       {STATUS_LABELS[status]}
       {status === "closed" && closeReason ? ` (${CLOSE_REASON_LABELS[closeReason]})` : ""}
     </span>
@@ -48,6 +48,9 @@ export function describeEvent(event: HistoryEvent<string>, userName: (id: string
         : `${actor} assigned it to ${to}`;
     }
     case "status_changed": {
+      if (event.detail?.note && event.fromStatus === "waiting_on_requester" && event.toStatus === "in_progress") {
+        return `${actor} sent it back to Ops with an update:`;
+      }
       const from = event.fromStatus ? STATUS_LABELS[event.fromStatus] : "?";
       const to = event.toStatus ? STATUS_LABELS[event.toStatus] : "?";
       const reason = event.detail?.closeReason ? ` (${CLOSE_REASON_LABELS[event.detail.closeReason]})` : "";

@@ -2,7 +2,7 @@ import { ObjectId, type Db } from "mongodb";
 import { requestsCollection, type RequestDoc } from "../collections";
 import { STATUS_LABELS, type HistoryEvent, type RequestDetail, type RequestView, type User } from "../domain";
 import { ServiceError } from "../errors";
-import { canAssign, canChangeStatus, isOps } from "../permissions";
+import { canAssign, canChangeStatus, isOps, sendBackNeedsUpdate } from "../permissions";
 import { checkTransition, isTerminal } from "../transitions";
 import type { TriageConfig } from "../triage";
 import type { AssignInput, CreateRequestInput, StatusChangeInput } from "../validation";
@@ -94,26 +94,31 @@ export async function assignRequest(db: Db, actor: User, id: string, input: Assi
 export async function changeStatus(db: Db, actor: User, id: string, input: StatusChangeInput): Promise<RequestDetail> {
   const doc = await loadRequest(db, id);
   if (!canChangeStatus(actor, doc, input.status, input.closeReason)) {
-    throw new ServiceError(
-      "forbidden",
-      actor.role === "ops"
-        ? "You can only change the status of requests assigned to you."
-        : doc.requesterId === actor.id
-          ? 'You can cancel your own request (close reason "cancelled_by_requester"); other changes are up to the Ops team.'
-          : "You can only cancel requests you submitted.",
-    );
+    throw new ServiceError("forbidden", statusDeniedMessage(actor, doc, input));
   }
   const check = checkTransition(doc, input.status, input.closeReason);
   if (!check.ok) throw new ServiceError("invalid_transition", check.reason);
 
+  const sendingBack = doc.status === "waiting_on_requester" && input.status === "in_progress";
+  if (input.note && !sendingBack) {
+    throw new ServiceError("invalid_input", "An update can only be added when sending a request back to Ops.");
+  }
+  if (sendBackNeedsUpdate(actor, doc, input.status) && !input.note) {
+    throw new ServiceError("invalid_input", "Add your update for the Ops team before sending this back.");
+  }
+
   const now = new Date();
+  const detail = {
+    ...(input.closeReason ? { closeReason: input.closeReason } : {}),
+    ...(input.note ? { note: input.note } : {}),
+  };
   const event: HistoryEvent = {
     type: "status_changed",
     at: now,
     actorId: actor.id,
     fromStatus: doc.status,
     toStatus: input.status,
-    ...(input.closeReason ? { detail: { closeReason: input.closeReason } } : {}),
+    ...(Object.keys(detail).length ? { detail } : {}),
   };
   await applyChange(
     db,
@@ -122,6 +127,17 @@ export async function changeStatus(db: Db, actor: User, id: string, input: Statu
     event,
   );
   return getRequestDetail(db, actor, id);
+}
+
+function statusDeniedMessage(actor: User, doc: RequestDoc, input: StatusChangeInput): string {
+  if (actor.role === "ops") {
+    return doc.assigneeId === actor.id && input.closeReason === "cancelled_by_requester"
+      ? 'Only the requester or the Ops Lead can close a request as "Cancelled by requester".'
+      : "Only the assignee or the Ops Lead can change this request.";
+  }
+  return doc.requesterId === actor.id
+    ? "You can cancel your request, or send it back to Ops when it's waiting on you. Other changes are up to the Ops team."
+    : "You can only change requests you submitted.";
 }
 
 /**

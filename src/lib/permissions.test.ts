@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { TriageState, User } from "./domain";
-import { canAssign, canChangeStatus, canViewMetrics, isTriageRetryable, requestActions } from "./permissions";
+import { CLOSE_REASONS, type Status, type TriageState, type User } from "./domain";
+import {
+  canAssign,
+  canChangeStatus,
+  canRetryTriage,
+  canReviewTriage,
+  canViewMetrics,
+  isTriageRetryable,
+  requestActions,
+  sendBackNeedsUpdate,
+} from "./permissions";
 
 const priya: User = { id: "priya", name: "Priya", role: "ops_lead" };
 const marcus: User = { id: "marcus", name: "Marcus", role: "ops" };
@@ -8,33 +17,109 @@ const dana: User = { id: "dana", name: "Dana", role: "ops" };
 const sam: User = { id: "sam", name: "Sam", role: "requester" };
 const alex: User = { id: "alex", name: "Alex", role: "requester" };
 
-const request = { requesterId: "sam", assigneeId: "marcus" };
+/** Sam's request, assigned to Marcus and in progress unless overridden. */
+const request = (overrides: { assigneeId?: string | null; status?: Status; requesterId?: string } = {}) => ({
+  requesterId: "sam",
+  assigneeId: "marcus" as string | null,
+  status: "in_progress" as Status,
+  ...overrides,
+});
+
+const allowedCloseReasons = (actor: User, req = request()) =>
+  CLOSE_REASONS.filter((reason) => canChangeStatus(actor, req, "closed", reason));
 
 describe("canChangeStatus", () => {
   it("lets the Ops Lead make any change, assigned or not", () => {
-    expect(canChangeStatus(priya, request, "done")).toBe(true);
-    expect(canChangeStatus(priya, { ...request, assigneeId: null }, "closed", "wont_do")).toBe(true);
+    expect(canChangeStatus(priya, request(), "done")).toBe(true);
+    expect(canChangeStatus(priya, request({ assigneeId: null, status: "new" }), "closed", "wont_do")).toBe(true);
   });
 
   it("lets Ops change only requests assigned to them", () => {
-    expect(canChangeStatus(marcus, request, "in_progress")).toBe(true);
-    expect(canChangeStatus(dana, request, "in_progress")).toBe(false);
-    expect(canChangeStatus(dana, request, "closed", "wont_do")).toBe(false);
+    expect(canChangeStatus(marcus, request(), "waiting_on_requester")).toBe(true);
+    expect(canChangeStatus(dana, request(), "waiting_on_requester")).toBe(false);
+    expect(canChangeStatus(dana, request(), "closed", "wont_do")).toBe(false);
+    expect(canChangeStatus(dana, request({ assigneeId: null, status: "new" }), "closed", "wont_do")).toBe(false);
   });
 
-  it("lets a requester cancel their own request, and nothing else", () => {
-    expect(canChangeStatus(sam, request, "closed", "cancelled_by_requester")).toBe(true);
-    expect(canChangeStatus(sam, request, "closed", "wont_do")).toBe(false);
-    expect(canChangeStatus(sam, request, "closed")).toBe(false);
-    expect(canChangeStatus(sam, request, "in_progress")).toBe(false);
+  describe("close reasons by role", () => {
+    it("requesters: only their own request, only as cancelled by requester", () => {
+      expect(allowedCloseReasons(sam)).toEqual(["cancelled_by_requester"]);
+      expect(canChangeStatus(sam, request(), "closed")).toBe(false);
+      expect(allowedCloseReasons(alex)).toEqual([]);
+    });
+
+    it("Ops members: won't do or can't do on their own requests, never cancelled by requester", () => {
+      expect(allowedCloseReasons(marcus)).toEqual(["wont_do", "cant_do"]);
+      expect(allowedCloseReasons(dana)).toEqual([]);
+    });
+
+    it("the Ops Lead: any reason, including cancelled by requester", () => {
+      expect(allowedCloseReasons(priya)).toEqual(["cancelled_by_requester", "wont_do", "cant_do"]);
+    });
+
+    it("an Ops member can still cancel a request they submitted themselves", () => {
+      expect(allowedCloseReasons(dana, request({ requesterId: "dana" }))).toEqual(["cancelled_by_requester"]);
+      expect(allowedCloseReasons(marcus, request({ requesterId: "marcus" }))).toEqual([
+        "cancelled_by_requester",
+        "wont_do",
+        "cant_do",
+      ]);
+    });
   });
 
-  it("doesn't let a requester cancel someone else's request", () => {
-    expect(canChangeStatus(alex, request, "closed", "cancelled_by_requester")).toBe(false);
+  describe("sending back to Ops", () => {
+    const waiting = request({ status: "waiting_on_requester" });
+
+    it("lets the requester move their own request from Waiting on requester to In progress", () => {
+      expect(canChangeStatus(sam, waiting, "in_progress")).toBe(true);
+      expect(canChangeStatus(alex, waiting, "in_progress")).toBe(false);
+    });
+
+    it("gives the requester no other moves", () => {
+      expect(canChangeStatus(sam, request({ status: "new" }), "in_progress")).toBe(false);
+      expect(canChangeStatus(sam, waiting, "done")).toBe(false);
+    });
+
+    it("requires an update from the requester, but not from the assignee or the Ops Lead", () => {
+      expect(sendBackNeedsUpdate(sam, waiting, "in_progress")).toBe(true);
+      expect(sendBackNeedsUpdate(marcus, waiting, "in_progress")).toBe(false);
+      expect(sendBackNeedsUpdate(priya, waiting, "in_progress")).toBe(false);
+      expect(sendBackNeedsUpdate(marcus, request({ status: "waiting_on_requester", requesterId: "marcus" }), "in_progress")).toBe(false);
+    });
+  });
+});
+
+describe("canReviewTriage", () => {
+  it("lets any Ops member review an unassigned request", () => {
+    expect(canReviewTriage(dana, request({ assigneeId: null, status: "new" }))).toBe(true);
   });
 
-  it("lets an Ops member cancel a request they submitted", () => {
-    expect(canChangeStatus(dana, { requesterId: "dana", assigneeId: "marcus" }, "closed", "cancelled_by_requester")).toBe(true);
+  it("limits an assigned request to its assignee and the Ops Lead", () => {
+    expect(canReviewTriage(marcus, request())).toBe(true);
+    expect(canReviewTriage(priya, request())).toBe(true);
+    expect(canReviewTriage(dana, request())).toBe(false);
+  });
+
+  it("limits a Done or Closed request to the Ops Lead", () => {
+    expect(canReviewTriage(priya, request({ status: "done" }))).toBe(true);
+    expect(canReviewTriage(marcus, request({ status: "done" }))).toBe(false);
+    expect(canReviewTriage(dana, request({ status: "closed", assigneeId: null }))).toBe(false);
+  });
+
+  it("never lets a requester review", () => {
+    expect(canReviewTriage(sam, request({ assigneeId: null, status: "new" }))).toBe(false);
+  });
+});
+
+describe("canRetryTriage", () => {
+  it("follows the review rule on open requests", () => {
+    expect(canRetryTriage(dana, request({ assigneeId: null, status: "new" }))).toBe(true);
+    expect(canRetryTriage(dana, request())).toBe(false);
+    expect(canRetryTriage(marcus, request())).toBe(true);
+  });
+
+  it("isn't allowed on a Done or Closed request, even for the Ops Lead", () => {
+    expect(canRetryTriage(priya, request({ status: "closed" }))).toBe(false);
   });
 });
 
@@ -96,28 +181,58 @@ describe("isTriageRetryable", () => {
 
 describe("requestActions", () => {
   const triage: TriageState = { status: "complete", suggestion: null, model: "m", error: null, attemptedAt: new Date() };
+  const failedTriage: TriageState = { ...triage, status: "failed" };
 
   it("offers a requester only cancellation of their own open request", () => {
-    expect(requestActions(sam, { ...request, status: "in_progress", triage })).toMatchObject({
+    expect(requestActions(sam, { ...request(), triage })).toMatchObject({
       canAssign: false,
       statusTransitions: ["closed"],
       closeReasons: ["cancelled_by_requester"],
-      canManageTriage: false,
+      sendBackNeedsUpdate: false,
+      canReviewTriage: false,
     });
   });
 
-  it("offers nothing on a finished request", () => {
-    expect(requestActions(priya, { ...request, status: "done", triage })).toMatchObject({
+  it("offers a requester sending back to Ops, with an update, while it waits on them", () => {
+    expect(requestActions(sam, { ...request({ status: "waiting_on_requester" }), triage })).toMatchObject({
+      statusTransitions: ["in_progress", "closed"],
+      closeReasons: ["cancelled_by_requester"],
+      sendBackNeedsUpdate: true,
+    });
+  });
+
+  it("offers the dropdown only the close reasons each role may pick", () => {
+    expect(requestActions(marcus, { ...request(), triage }).closeReasons).toEqual(["wont_do", "cant_do"]);
+    expect(requestActions(priya, { ...request(), triage }).closeReasons).toEqual(["cancelled_by_requester", "wont_do", "cant_do"]);
+  });
+
+  it("offers an Ops member nothing on someone else's assigned request", () => {
+    expect(requestActions(dana, { ...request(), triage: failedTriage })).toMatchObject({
       canAssign: false,
       canSelfAssign: false,
       statusTransitions: [],
       closeReasons: [],
+      canReviewTriage: false,
+      canRetryTriage: false,
     });
   });
 
+  it("offers only the Ops Lead's triage review on a finished request", () => {
+    const done = { ...request({ status: "done" }), triage: failedTriage };
+    expect(requestActions(priya, done)).toMatchObject({
+      canAssign: false,
+      canSelfAssign: false,
+      statusTransitions: [],
+      closeReasons: [],
+      canReviewTriage: true,
+      canRetryTriage: false,
+    });
+    expect(requestActions(marcus, done)).toMatchObject({ statusTransitions: [], canReviewTriage: false });
+  });
+
   it("offers an Ops member self-assignment only while the request is unassigned and open", () => {
-    const unassigned = { ...request, assigneeId: null, status: "new" as const, triage };
-    expect(requestActions(dana, unassigned)).toMatchObject({ canAssign: false, canSelfAssign: true });
+    const unassigned = { ...request({ assigneeId: null, status: "new" }), triage };
+    expect(requestActions(dana, unassigned)).toMatchObject({ canAssign: false, canSelfAssign: true, canReviewTriage: true });
     expect(requestActions(dana, { ...unassigned, assigneeId: "marcus" })).toMatchObject({ canSelfAssign: false });
     expect(requestActions(dana, { ...unassigned, status: "closed" })).toMatchObject({ canSelfAssign: false });
     expect(requestActions(sam, unassigned)).toMatchObject({ canSelfAssign: false });

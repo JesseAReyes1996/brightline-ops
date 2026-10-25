@@ -2,14 +2,12 @@
 // dependencies, so the services, the API routes, and client components all
 // import from it.
 
-export const ROLES = ["requester", "ops", "ops_lead"] as const;
-export type Role = (typeof ROLES)[number];
+export type Role = "requester" | "ops" | "ops_lead";
 
 export const STATUSES = ["new", "in_progress", "waiting_on_requester", "done", "closed"] as const;
 export type Status = (typeof STATUSES)[number];
 
 export const OPEN_STATUSES = ["new", "in_progress", "waiting_on_requester"] as const;
-export type OpenStatus = (typeof OPEN_STATUSES)[number];
 
 export const CLOSE_REASONS = ["cancelled_by_requester", "wont_do", "cant_do"] as const;
 export type CloseReason = (typeof CLOSE_REASONS)[number];
@@ -26,16 +24,14 @@ export type Category = (typeof CATEGORIES)[number];
 export const URGENCIES = ["low", "medium", "high", "critical"] as const;
 export type Urgency = (typeof URGENCIES)[number];
 
-export const HISTORY_EVENT_TYPES = [
-  "created",
-  "assigned",
-  "status_changed",
-  "triage_completed",
-  "triage_failed",
-  "triage_accepted",
-  "triage_overridden",
-] as const;
-export type HistoryEventType = (typeof HISTORY_EVENT_TYPES)[number];
+type HistoryEventType =
+  | "created"
+  | "assigned"
+  | "status_changed"
+  | "triage_completed"
+  | "triage_failed"
+  | "triage_accepted"
+  | "triage_overridden";
 
 export const ROLE_LABELS: Record<Role, string> = {
   requester: "Requester",
@@ -86,10 +82,11 @@ export interface TriageValues {
 export type TriageField = keyof TriageValues;
 export const TRIAGE_FIELDS: readonly TriageField[] = ["category", "urgency", "summary"];
 export const SUMMARY_MAX_LENGTH = 140;
+export const UPDATE_NOTE_MAX_LENGTH = 1000;
 
-/** Fields where the confirmed values differ from the AI suggestion; all of them when there was no suggestion. */
-export function overriddenTriageFields(suggestion: TriageValues | null, confirmed: TriageValues): TriageField[] {
-  return TRIAGE_FIELDS.filter((field) => !suggestion || suggestion[field] !== confirmed[field]);
+/** Fields where the final values Ops set differ from the AI suggestion; all of them when there was no suggestion. */
+export function overriddenTriageFields(suggestion: TriageValues | null, final: TriageValues): TriageField[] {
+  return TRIAGE_FIELDS.filter((field) => !suggestion || suggestion[field] !== final[field]);
 }
 
 // The shapes below are generic over the date type `D`: `Date` in the stored
@@ -116,6 +113,8 @@ export interface HistoryEvent<D = Date> {
     model?: string;
     error?: string;
     overriddenFields?: TriageField[];
+    /** The requester's update when sending a request back to Ops. */
+    note?: string;
   };
 }
 
@@ -146,8 +145,10 @@ export interface RequestActions {
   statusTransitions: Status[];
   /** Reasons this user may pick when closing; empty when they can't close. */
   closeReasons: CloseReason[];
-  /** Accept or override the AI triage. */
-  canManageTriage: boolean;
+  /** Moving to In progress is the requester sending it back, which needs their update. */
+  sendBackNeedsUpdate: boolean;
+  /** Accept, override, or edit the triage review. */
+  canReviewTriage: boolean;
   canRetryTriage: boolean;
 }
 

@@ -2,7 +2,14 @@
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { CATEGORY_LABELS, TRIAGE_FIELDS, type TriageField } from "@/src/lib/domain";
-import type { MetricName, MetricsGroup, MetricsReport, MetricStats, TriageReviewStats } from "@/src/lib/metrics";
+import type {
+  MetricName,
+  MetricsGroup,
+  MetricsReport,
+  MetricStats,
+  MetricsSummary,
+  TriageReviewStats,
+} from "@/src/lib/metrics";
 import { isOpsLead } from "@/src/lib/permissions";
 import { useApi } from "../_components/api";
 import { formatDuration } from "../_components/format";
@@ -58,7 +65,7 @@ function Metrics() {
 
   return (
     <div className="stack wide">
-      <Headlines groups={data.groups} triage={data.triage} />
+      <Headlines overall={data.overall} triage={data.triage} />
 
       <section>
         <h2>By category</h2>
@@ -93,31 +100,19 @@ function Metrics() {
   );
 }
 
-/**
- * Four numbers across all categories. The API reports per-category stats, and
- * a median can't be combined across groups, so the times shown here are the
- * exact overall average: each group's average weighted by its count.
- */
-function Headlines({ groups, triage }: { groups: MetricsGroup[]; triage: TriageReviewStats }) {
-  const overall = (key: MetricName) => {
-    const withValues = groups.filter((g) => g[key].average !== null);
-    const count = withValues.reduce((sum, g) => sum + g[key].count, 0);
-    const total = withValues.reduce((sum, g) => sum + g[key].average! * g[key].count, 0);
-    return { average: count ? total / count : null, count };
-  };
-
+/** Four numbers across all categories: overall medians, and the AI acceptance rate. */
+function Headlines({ overall, triage }: { overall: MetricsSummary; triage: TriageReviewStats }) {
   return (
     <section className="headlines" aria-label="Across all categories">
-      {METRICS.slice(0, 3).map((m) => {
-        const { average, count } = overall(m.key);
-        return (
-          <div key={m.key} className="headline">
-            <div className="headline-label">{m.label}</div>
-            <div className="headline-value">{formatDuration(average)}</div>
-            <div className="muted small">{count ? `average of ${plural(count, "request")}` : "no data yet"}</div>
+      {METRICS.slice(0, 3).map((m) => (
+        <div key={m.key} className="headline">
+          <div className="headline-label">{m.label}</div>
+          <div className="headline-value">
+            <StatValue stats={overall[m.key]} align="start" />
           </div>
-        );
-      })}
+          <div className="muted small">median, all requests</div>
+        </div>
+      ))}
       <div className="headline">
         <div className="headline-label">AI suggestions accepted unchanged</div>
         <div className="headline-value">{percent(triage.acceptedUnchangedRate)}</div>
@@ -161,7 +156,7 @@ function useEscapeToDismiss() {
 }
 
 /** The median, with its average and sample size on hover or keyboard focus. */
-function StatValue({ stats, align }: { stats: MetricStats; align: "center" | "end" }) {
+function StatValue({ stats, align }: { stats: MetricStats; align: "start" | "center" | "end" }) {
   const id = useId();
   const { dismissed, handlers } = useEscapeToDismiss();
   if (stats.median === null) return <>—</>;

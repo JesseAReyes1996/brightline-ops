@@ -59,7 +59,7 @@ function elapsed(from: Date, to: Date): number {
   return to.getTime() - from.getTime();
 }
 
-export const METRIC_NAMES = ["timeToAssignment", "timeToPickup", "handlingTime", "waitingOnRequesterTime"] as const;
+const METRIC_NAMES = ["timeToAssignment", "timeToPickup", "handlingTime", "waitingOnRequesterTime"] as const;
 export type MetricName = (typeof METRIC_NAMES)[number];
 
 export interface MetricStats {
@@ -69,47 +69,59 @@ export interface MetricStats {
   average: number | null;
 }
 
-export type MetricsGroup = { category: Category | "untriaged"; requestCount: number } & Record<MetricName, MetricStats>;
+/** Each metric summarized over a set of requests. */
+export type MetricsSummary = { requestCount: number } & Record<MetricName, MetricStats>;
+
+export type MetricsGroup = { category: Category | "untriaged" } & MetricsSummary;
 
 /**
- * Groups requests by the category Ops accepted ("untriaged" when none was
- * accepted yet) and summarizes each metric over the requests it applies to.
- * Every group comes back, in the fixed category order with untriaged last;
- * a group with no requests has a requestCount of 0.
+ * Summarizes each metric over the requests it applies to, twice: per category
+ * Ops accepted ("untriaged" when none was accepted yet), and overall across
+ * every request. Overall figures come from all the requests' values pooled
+ * together, since a median can't be built from per-category medians. Every
+ * category group comes back, in the fixed order with untriaged last; a group
+ * with no requests has a requestCount of 0.
  */
 export function aggregateMetrics(
   requests: ReadonlyArray<{ accepted: Pick<TriageValues, "category"> | null; history: readonly HistoryEvent[] }>,
-): MetricsGroup[] {
+): { groups: MetricsGroup[]; overall: MetricsSummary } {
+  const all: RequestMetrics[] = [];
   const byGroup = new Map<Category | "untriaged", RequestMetrics[]>();
   for (const request of requests) {
+    const metrics = computeRequestMetrics(request.history);
     const group = request.accepted?.category ?? "untriaged";
-    byGroup.set(group, [...(byGroup.get(group) ?? []), computeRequestMetrics(request.history)]);
+    all.push(metrics);
+    byGroup.set(group, [...(byGroup.get(group) ?? []), metrics]);
   }
 
-  const groups: (Category | "untriaged")[] = [...CATEGORIES, "untriaged"];
-  return groups.map((group) => {
-    const metrics = byGroup.get(group) ?? [];
-    const stats = Object.fromEntries(
-      METRIC_NAMES.map((name) => [name, summarize(metrics.map((m) => m[name]))]),
-    ) as Record<MetricName, MetricStats>;
-    return { category: group, requestCount: metrics.length, ...stats };
-  });
+  const order: (Category | "untriaged")[] = [...CATEGORIES, "untriaged"];
+  return {
+    groups: order.map((category) => ({ category, ...summarizeEach(byGroup.get(category) ?? []) })),
+    overall: summarizeEach(all),
+  };
+}
+
+function summarizeEach(metrics: RequestMetrics[]): MetricsSummary {
+  const stats = Object.fromEntries(
+    METRIC_NAMES.map((name) => [name, summarize(metrics.map((m) => m[name]))]),
+  ) as Record<MetricName, MetricStats>;
+  return { requestCount: metrics.length, ...stats };
 }
 
 export interface TriageReviewStats {
   /** Requests with an AI suggestion that Ops has accepted or overridden. */
   reviewed: number;
   acceptedUnchanged: number;
-  /** Share of reviewed requests confirmed with no field changed; null when none were reviewed. */
+  /** Share of reviewed requests whose final values match the suggestion exactly; null when none were reviewed. */
   acceptedUnchangedRate: number | null;
   /** Per field, how many reviewed requests had it changed, and that share of `reviewed`. */
   overrides: Record<TriageField, { count: number; rate: number | null }>;
 }
 
 /**
- * How often Ops agreed with the AI. Only requests where Ops confirmed triage
+ * How often Ops agreed with the AI. Only requests where Ops reviewed triage
  * and there is an AI suggestion count: when AI triage failed and Ops
- * classified by hand, there is no AI output to judge. The confirmed values are
+ * classified by hand, there is no AI output to judge. The final values are
  * compared with the suggestion by the same rule that decides between the
  * triage_accepted and triage_overridden history events. A request can have
  * several fields overridden, so the per-field rates don't add up to the
@@ -136,6 +148,7 @@ export function summarizeTriageReviews(
 /** What GET /api/metrics returns. */
 export interface MetricsReport {
   groups: MetricsGroup[];
+  overall: MetricsSummary;
   triage: TriageReviewStats;
 }
 

@@ -11,5 +11,5 @@ export async function getMetricsReport(db: Db, actor: User): Promise<MetricsRepo
   const requests = await requestsCollection(db)
     .find({}, { projection: { accepted: 1, history: 1, "triage.suggestion": 1 } })
     .toArray();
-  return { groups: aggregateMetrics(requests), triage: summarizeTriageReviews(requests) };
+  return { ...aggregateMetrics(requests), triage: summarizeTriageReviews(requests) };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CloseReason, HistoryEvent, Status, TriageValues } from "../domain";
-import { aggregateMetrics, computeRequestMetrics, summarizeTriageReviews } from "./index";
+import { aggregateMetrics, computeRequestMetrics, summarizeTriageReviews, type RequestMetrics } from "./index";
 
 const MINUTE = 60_000;
 const START = new Date("2026-03-02T09:00:00Z").getTime();
@@ -26,7 +26,7 @@ const moved = (m: number, fromStatus: Status, toStatus: Status, closeReason?: Cl
 const triaged = (m: number): HistoryEvent => ({ type: "triage_completed", at: at(m), actorId: "sam" });
 
 /** Minutes, so expectations read naturally. */
-const inMinutes = (metrics: ReturnType<typeof computeRequestMetrics>) =>
+const inMinutes = (metrics: RequestMetrics) =>
   Object.fromEntries(Object.entries(metrics).map(([k, v]) => [k, v === null ? null : v / MINUTE]));
 
 describe("computeRequestMetrics", () => {
@@ -141,11 +141,11 @@ describe("aggregateMetrics", () => {
     moved(doneAt, "in_progress", "done"),
   ];
 
-  const group = (groups: ReturnType<typeof aggregateMetrics>, category: string) =>
+  const group = (groups: ReturnType<typeof aggregateMetrics>["groups"], category: string) =>
     groups.find((g) => g.category === category)!;
 
   it("groups by accepted category, falling back to untriaged, and returns every group in a fixed order", () => {
-    const groups = aggregateMetrics([
+    const { groups } = aggregateMetrics([
       { accepted: null, history: [created(0)] },
       { accepted: { category: "system_access" }, history: finished(10, 20, 30) },
       { accepted: { category: "laptops_hardware" }, history: finished(10, 20, 30) },
@@ -168,7 +168,7 @@ describe("aggregateMetrics", () => {
         { accepted: { category: "other" }, history: finished(20, 30, 40) },
         { accepted: { category: "other" }, history: finished(60, 70, 80) },
         { accepted: { category: "other" }, history: [created(0), assigned(30, "dana")] }, // not picked up
-      ]),
+      ]).groups,
       "other",
     );
     expect(other.requestCount).toBe(4);
@@ -179,11 +179,38 @@ describe("aggregateMetrics", () => {
   });
 
   it("gives null median and average when no request in a group has a value, or the group is empty", () => {
-    const groups = aggregateMetrics([{ accepted: null, history: [created(0)] }]);
+    const { groups } = aggregateMetrics([{ accepted: null, history: [created(0)] }]);
     expect(group(groups, "untriaged").timeToPickup).toEqual({ count: 0, median: null, average: null });
     expect(group(groups, "vendor_contracts")).toMatchObject({
       requestCount: 0,
       handlingTime: { count: 0, median: null, average: null },
+    });
+  });
+
+  it("summarizes all requests together overall, pooling values rather than combining group medians", () => {
+    const { groups, overall } = aggregateMetrics([
+      { accepted: { category: "system_access" }, history: finished(10, 20, 30) },
+      { accepted: { category: "system_access" }, history: finished(20, 30, 40) },
+      { accepted: { category: "system_access" }, history: finished(30, 40, 50) },
+      { accepted: { category: "vendor_contracts" }, history: finished(100, 110, 120) },
+      { accepted: null, history: [created(0)] }, // counts as a request, has no values
+    ]);
+    // Group medians are 20 and 100; their midpoint (60) would be wrong. Pooled: 10, 20, 30, 100.
+    expect(group(groups, "system_access").timeToAssignment.median).toBe(20 * MINUTE);
+    expect(group(groups, "vendor_contracts").timeToAssignment.median).toBe(100 * MINUTE);
+    expect(overall.requestCount).toBe(5);
+    expect(overall.timeToAssignment).toEqual({ count: 4, median: 25 * MINUTE, average: 40 * MINUTE });
+    expect(overall.handlingTime).toEqual({ count: 4, median: 10 * MINUTE, average: 10 * MINUTE });
+    expect(overall.waitingOnRequesterTime).toEqual({ count: 4, median: 0, average: 0 });
+  });
+
+  it("gives an empty overall summary when there are no requests", () => {
+    expect(aggregateMetrics([]).overall).toEqual({
+      requestCount: 0,
+      timeToAssignment: { count: 0, median: null, average: null },
+      timeToPickup: { count: 0, median: null, average: null },
+      handlingTime: { count: 0, median: null, average: null },
+      waitingOnRequesterTime: { count: 0, median: null, average: null },
     });
   });
 });
@@ -199,7 +226,7 @@ describe("summarizeTriageReviews", () => {
       reviewed({}),
       reviewed({ category: "other" }),
       reviewed({ urgency: "low", summary: "Rewritten summary." }),
-      // Not counted: AI suggested but Ops hasn't confirmed yet.
+      // Not counted: AI suggested but Ops hasn't reviewed it yet.
       { triage: { suggestion }, accepted: null },
       // Not counted: AI triage failed and Ops classified it by hand.
       { triage: { suggestion: null }, accepted: suggestion },

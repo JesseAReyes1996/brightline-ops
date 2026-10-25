@@ -81,7 +81,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "medium",
         summary: "New account executive needs a Salesforce login with standard AE permissions.",
       },
-      confirmed: { at: ago(20), by: "priya" },
+      reviewed: { at: ago(20), by: "priya" },
       events: [assign(ago(20), "priya", "marcus")],
     }),
     seedRequest({
@@ -96,7 +96,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "high",
         summary: "Zoom renews Nov 15 at a higher rate; renegotiate or switch to annual billing first.",
       },
-      confirmed: { at: ago(119), by: "priya" },
+      reviewed: { at: ago(119), by: "priya" },
       events: [
         assign(ago(118), "priya", "marcus"),
         assign(ago(110), "priya", "dana", "marcus"),
@@ -115,7 +115,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "high",
         summary: "Weekend AV contractor crew needs building badges for Saturday and Sunday.",
       },
-      confirmed: { at: ago(29), by: "priya", change: { category: "system_access" } },
+      reviewed: { at: ago(29), by: "priya", change: { category: "system_access" } },
       events: [assign(ago(29), "priya", "priya"), move(ago(28), "priya", "new", "in_progress")],
     }),
     seedRequest({
@@ -130,7 +130,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "medium",
         summary: "Move the six-person analytics team to the 3rd floor, including desks and network.",
       },
-      confirmed: { at: ago(69), by: "luis", change: { urgency: "low" } },
+      reviewed: { at: ago(69), by: "luis", change: { urgency: "low" } },
       events: [
         assign(ago(70), "priya", "luis"),
         move(ago(60), "luis", "new", "in_progress"),
@@ -150,7 +150,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "low",
         summary: "External monitor at desk 2-14 flickers and needs replacing.",
       },
-      confirmed: { at: ago(236), by: "hannah" },
+      reviewed: { at: ago(236), by: "hannah" },
       events: [
         assign(ago(236), "priya", "hannah"),
         move(ago(230), "hannah", "new", "in_progress"),
@@ -168,7 +168,10 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "low",
         summary: "Design contractor needs expense tool access to submit invoices.",
       },
-      events: [assign(ago(148), "priya", "theo"), move(ago(140), "theo", "new", "closed", "cancelled_by_requester")],
+      events: [
+        assign(ago(148), "priya", "theo"),
+        move(ago(140), "jordan", "new", "closed", "cancelled_by_requester"), // the requester cancelled it
+      ],
     }),
     seedRequest({
       title: "Laptop battery is swelling",
@@ -181,7 +184,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "high",
         summary: "Laptop battery is swelling and the laptop needs replacing.",
       },
-      confirmed: { at: ago(499), by: "priya" },
+      reviewed: { at: ago(499), by: "priya" },
       events: [
         assign(ago(499), "priya", "hannah"),
         move(ago(497), "hannah", "new", "in_progress"),
@@ -199,7 +202,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "medium",
         summary: "Renew the design team's Figma licenses, possibly with two extra seats.",
       },
-      confirmed: { at: ago(466), by: "priya" },
+      reviewed: { at: ago(466), by: "priya" },
       events: [
         assign(ago(466), "priya", "dana"),
         move(ago(450), "dana", "new", "in_progress"),
@@ -219,7 +222,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "high",
         summary: "New platform contractor needs write access to the infra GitHub repositories by tomorrow.",
       },
-      confirmed: { at: ago(427), by: "theo", change: { urgency: "medium" } },
+      reviewed: { at: ago(427), by: "theo", change: { urgency: "medium" } },
       events: [
         assign(ago(429.5), "priya", "marcus"),
         assign(ago(428), "priya", "theo", "marcus"), // Marcus was out sick
@@ -238,7 +241,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "low",
         summary: "Book a 25-person room with a projector for next month's quarterly offsite.",
       },
-      confirmed: { at: ago(394), by: "luis", change: { category: "office_facilities" } },
+      reviewed: { at: ago(394), by: "luis", change: { category: "office_facilities" } },
       events: [
         assign(ago(394), "priya", "luis"),
         move(ago(370), "luis", "new", "in_progress"),
@@ -256,7 +259,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "medium",
         summary: "Desk chair's gas lift is broken and the chair needs replacing.",
       },
-      confirmed: { at: ago(358), by: "priya" },
+      reviewed: { at: ago(358), by: "priya" },
       events: [
         assign(ago(358), "priya", "luis"),
         move(ago(355), "luis", "new", "in_progress"),
@@ -276,7 +279,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "low",
         summary: "Cancel the unused Zoom webinar add-on.",
       },
-      confirmed: { at: ago(327), by: "dana" },
+      reviewed: { at: ago(327), by: "dana" },
       events: [
         assign(ago(327), "priya", "dana"),
         move(ago(306), "dana", "new", "in_progress"),
@@ -294,7 +297,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "medium",
         summary: "Needs VPN access for a remote work week.",
       },
-      confirmed: {
+      reviewed: {
         at: ago(298.5),
         by: "marcus",
         change: { urgency: "high", summary: "Set up VPN access before Monday for a week of remote work." },
@@ -316,7 +319,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "low",
         summary: "Wants a second monitor shipped to their home office.",
       },
-      confirmed: { at: ago(255), by: "hannah" },
+      reviewed: { at: ago(255), by: "hannah" },
       events: [
         assign(ago(255), "priya", "hannah"),
         move(ago(240), "hannah", "new", "in_progress"),
@@ -334,7 +337,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "medium",
         summary: "Wants local admin rights on their laptop to install a database tool.",
       },
-      confirmed: { at: ago(198), by: "priya" },
+      reviewed: { at: ago(198), by: "priya" },
       events: [
         assign(ago(198), "priya", "marcus"),
         move(ago(196), "marcus", "new", "in_progress"),
@@ -352,7 +355,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "low",
         summary: "Order 40 branded T-shirts for next month's hackathon; sizes to follow.",
       },
-      confirmed: { at: ago(142), by: "theo" },
+      reviewed: { at: ago(142), by: "theo" },
       events: [
         assign(ago(142), "priya", "theo"),
         move(ago(120), "theo", "new", "in_progress"),
@@ -372,7 +375,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "medium",
         summary: "New hire would like a mechanical keyboard.",
       },
-      confirmed: { at: ago(99), by: "priya" },
+      reviewed: { at: ago(99), by: "priya" },
       events: [
         assign(ago(99), "priya", "hannah"),
         move(ago(90), "jordan", "new", "closed", "cancelled_by_requester"), // the requester cancelled it
@@ -389,7 +392,7 @@ export function buildSeedRequests(now: Date): RequestDoc[] {
         urgency: "high",
         summary: "Slack contract renews soon.",
       },
-      confirmed: {
+      reviewed: {
         at: ago(70),
         by: "priya",
         change: { summary: "Renew Slack's annual contract within three weeks; get Business+ quotes." },
@@ -411,23 +414,23 @@ interface SeedInput {
   createdAt: Date;
   /** Canned triage outcome: a suggestion, or the reason it failed. */
   triage: TriageValues | { error: string };
-  /** Ops confirming the suggestion at `at`, with any fields they changed. */
-  confirmed?: { at: Date; by: string; change?: Partial<TriageValues> };
+  /** Ops reviewing the suggestion at `at`, with any fields they changed. */
+  reviewed?: { at: Date; by: string; change?: Partial<TriageValues> };
   /** Assignments and status changes after creation, oldest first. */
   events?: HistoryEvent[];
 }
 
 /**
- * Builds a request whose status, assignee, and confirmed triage are all
+ * Builds a request whose status, assignee, and final triage are all
  * derived from its history, so they always agree, using the same event shapes
  * the services write.
  */
 function seedRequest(input: SeedInput): RequestDoc {
-  const { triage, createdAt, requesterId, confirmed } = input;
+  const { triage, createdAt, requesterId, reviewed } = input;
   const triagedAt = new Date(createdAt.getTime() + 5_000);
   const suggestion = "error" in triage ? null : triage;
   const failure = "error" in triage ? triage.error : null;
-  const accepted = suggestion && confirmed ? { ...suggestion, ...confirmed.change } : null;
+  const accepted = suggestion && reviewed ? { ...suggestion, ...reviewed.change } : null;
 
   const history: HistoryEvent[] = [
     { type: "created", at: createdAt, actorId: requesterId },
@@ -436,15 +439,15 @@ function seedRequest(input: SeedInput): RequestDoc {
       : { type: "triage_failed", at: triagedAt, actorId: requesterId, detail: { error: failure } },
     ...(input.events ?? []),
   ];
-  if (accepted && confirmed) {
+  if (accepted && reviewed) {
     const overriddenFields = overriddenTriageFields(suggestion, accepted);
     history.push(
       overriddenFields.length === 0
-        ? { type: "triage_accepted", at: confirmed.at, actorId: confirmed.by }
-        : { type: "triage_overridden", at: confirmed.at, actorId: confirmed.by, detail: { overriddenFields } },
+        ? { type: "triage_accepted", at: reviewed.at, actorId: reviewed.by }
+        : { type: "triage_overridden", at: reviewed.at, actorId: reviewed.by, detail: { overriddenFields } },
     );
   }
-  // The confirmation was appended last; a stable sort puts it in time order.
+  // The review was appended last; a stable sort puts it in time order.
   history.sort((a, b) => a.at.getTime() - b.at.getTime());
 
   const lastStatusChange = history.findLast((e) => e.type === "status_changed");

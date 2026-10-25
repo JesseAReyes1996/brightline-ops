@@ -224,6 +224,11 @@ button:disabled {
   bottom: calc(100% + 4px);
 }
 
+.tip.start {
+  left: 0;
+  transform: none;
+}
+
 .tip.end {
   left: auto;
   right: 0;
@@ -350,4 +355,11 @@ td {
 .timeline time {
   color: var(--muted);
   margin-right: 0.5rem;
+}
+
+.timeline .note {
+  margin: 0.25rem 0 0;
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid var(--border);
+  background: var(--notice-bg);
 }

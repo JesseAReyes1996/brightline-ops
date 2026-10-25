@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CATEGORIES, CLOSE_REASONS, OPEN_STATUSES, STATUSES, SUMMARY_MAX_LENGTH, URGENCIES } from "./domain";
+import { CATEGORIES, CLOSE_REASONS, STATUSES, SUMMARY_MAX_LENGTH, UPDATE_NOTE_MAX_LENGTH, URGENCIES } from "./domain";
 import { ServiceError } from "./errors";
 
 export const createRequestSchema = z.object({
@@ -19,10 +19,17 @@ export const assignSchema = z.object({
 export type AssignInput = z.infer<typeof assignSchema>;
 
 // Whether closeReason is required (or allowed) depends on the target status,
-// which is a transition rule, so that check lives in transitions.ts.
+// which is a transition rule, so that check lives in transitions.ts. Likewise
+// whether a note is required or allowed is checked in the service.
 export const statusChangeSchema = z.object({
   status: z.enum(STATUSES),
   closeReason: z.enum(CLOSE_REASONS).optional(),
+  note: z
+    .string()
+    .trim()
+    .min(1, "Your update can't be empty")
+    .max(UPDATE_NOTE_MAX_LENGTH, `Your update must be ${UPDATE_NOTE_MAX_LENGTH} characters or fewer`)
+    .optional(),
 });
 export type StatusChangeInput = z.infer<typeof statusChangeSchema>;
 
@@ -30,9 +37,10 @@ export const sessionSchema = z.object({
   userId: z.string().min(1, "userId is required"),
 });
 
+/** For the queue: no status means open requests only; "all" means every status. */
 export const listRequestsQuerySchema = z.object({
   view: z.enum(["mine", "queue"]).default("mine"),
-  status: z.enum(OPEN_STATUSES).optional(),
+  status: z.enum([...STATUSES, "all"]).optional(),
 });
 
 /**
@@ -46,7 +54,7 @@ export const triageSummarySchema = z
   .max(SUMMARY_MAX_LENGTH, `must be ${SUMMARY_MAX_LENGTH} characters or fewer`)
   .refine((summary) => !/[\r\n]/.test(summary), "must be a single line");
 
-/** What Ops confirms when accepting or overriding triage. */
+/** The final triage values Ops sets when accepting or overriding the AI suggestion. */
 export const acceptedTriageSchema = z.object({
   category: z.enum(CATEGORIES),
   urgency: z.enum(URGENCIES),

@@ -1,6 +1,6 @@
 import { ObjectId, type Db } from "mongodb";
 import { requestsCollection, type RequestDoc } from "../collections";
-import { OPEN_STATUSES, type OpenStatus, type RequestDetail, type RequestView, type User } from "../domain";
+import { OPEN_STATUSES, type RequestDetail, type RequestView, type Status, type User } from "../domain";
 import { ServiceError } from "../errors";
 import { canViewRequest, isOps, requestActions } from "../permissions";
 
@@ -9,13 +9,12 @@ export async function listMyRequests(db: Db, actor: User): Promise<RequestView[]
   return docs.map(toRequestView);
 }
 
-/** Open requests for the Ops queue, oldest first. */
-export async function listQueue(db: Db, actor: User, filter: { status?: OpenStatus }): Promise<RequestView[]> {
+/** The Ops queue, oldest first: open requests by default, one status, or "all". */
+export async function listQueue(db: Db, actor: User, filter: { status?: Status | "all" }): Promise<RequestView[]> {
   if (!isOps(actor)) throw new ServiceError("forbidden", "Only the Ops team can see the queue.");
-  const docs = await requestsCollection(db)
-    .find({ status: filter.status ?? { $in: [...OPEN_STATUSES] } })
-    .sort({ createdAt: 1 })
-    .toArray();
+  const query =
+    filter.status === "all" ? {} : { status: filter.status ?? { $in: [...OPEN_STATUSES] } };
+  const docs = await requestsCollection(db).find(query).sort({ createdAt: 1 }).toArray();
   return docs.map(toRequestView);
 }
 
