@@ -4,7 +4,12 @@ import { CATEGORIES, URGENCIES, type TriageValues } from "../domain";
 import { formatIssues, triageSummarySchema } from "../validation";
 import { TRIAGE_TOOL_NAME } from "./prompt";
 
-type TriageParseResult = { ok: true; suggestion: TriageValues } | { ok: false; error: string };
+/**
+ * On failure, `toolUseId` is set only when the model made exactly one
+ * record_triage call whose input failed validation: the one failure the model
+ * can be asked to correct.
+ */
+type TriageParseResult = { ok: true; suggestion: TriageValues } | { ok: false; error: string; toolUseId?: string };
 
 const notAllowed = (field: string) => (issue: { input?: unknown }) =>
   issue.input === undefined ? "missing" : `${JSON.stringify(issue.input)} is not an allowed ${field}`;
@@ -40,6 +45,8 @@ export function parseTriageResponse(
   if (calls.length > 1) return { ok: false, error: `model called ${TRIAGE_TOOL_NAME} more than once` };
 
   const result = triageOutputSchema.safeParse(calls[0].input);
-  if (!result.success) return { ok: false, error: `invalid AI output: ${formatIssues(result.error)}` };
+  if (!result.success) {
+    return { ok: false, error: `invalid AI output: ${formatIssues(result.error)}`, toolUseId: calls[0].id };
+  }
   return { ok: true, suggestion: result.data };
 }

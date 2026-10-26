@@ -81,6 +81,8 @@ export interface TriageValues {
 }
 export type TriageField = keyof TriageValues;
 export const TRIAGE_FIELDS: readonly TriageField[] = ["category", "urgency", "summary"];
+export const TITLE_MAX_LENGTH = 120;
+export const DESCRIPTION_MAX_LENGTH = 5000;
 export const SUMMARY_MAX_LENGTH = 140;
 export const UPDATE_NOTE_MAX_LENGTH = 1000;
 
@@ -115,6 +117,8 @@ export interface HistoryEvent<D = Date> {
     overriddenFields?: TriageField[];
     /** The requester's update when sending a request back to Ops. */
     note?: string;
+    /** On triage events, which attempt this was when the first output was rejected and the model was asked to fix it. */
+    attempt?: number;
   };
 }
 

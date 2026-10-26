@@ -1,8 +1,8 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
-import { runTriage } from "./index";
+import { runTriage, type TriageConfig } from "./index";
 import { parseTriageResponse } from "./parse";
-import { buildTriagePrompt, formatPromptDate, TRIAGE_TOOL_NAME } from "./prompt";
+import { buildRepairPrompt, buildTriagePrompt, formatPromptDate, TRIAGE_TOOL_NAME, type TriagePrompt } from "./prompt";
 
 const VALID = {
   category: "system_access",
@@ -25,7 +25,7 @@ function response(
 /** Parses a response whose only content is one record_triage call with `input`. */
 const parseInput = (input: unknown) => parseTriageResponse(response([toolCall(input)]));
 
-const failedWith = (fragment: string) => ({ ok: false, error: expect.stringContaining(fragment) });
+const failedWith = (fragment: string) => expect.objectContaining({ ok: false, error: expect.stringContaining(fragment) });
 
 describe("parseTriageResponse", () => {
   describe("valid output", () => {
@@ -179,12 +179,157 @@ describe("buildTriagePrompt", () => {
   });
 });
 
-describe("runTriage", () => {
-  it("fails with 'no API key configured' when there is no key, without calling the API", async () => {
-    const result = await runTriage(
-      { title: "Laptop", description: "Broken" },
-      { apiKey: undefined, model: "claude-haiku-5-5", timeoutMs: 15_000 },
+describe("parseTriageResponse repairability", () => {
+  it("marks invalid record_triage input as repairable, with the call's id", () => {
+    expect(parseInput({ ...VALID, summary: "x".repeat(141) })).toEqual(
+      expect.objectContaining({ ok: false, toolUseId: "toolu_test" }),
     );
-    expect(result).toEqual({ status: "failed", error: "no API key configured" });
+  });
+
+  it.each([
+    ["a refusal", response([], "refusal", { type: "refusal", category: "cyber", explanation: null })],
+    ["cut-off output", response([toolCall(VALID)], "max_tokens")],
+    ["no tool call", response([{ type: "text", text: "Hardware.", citations: null }], "end_turn")],
+    ["two tool calls", response([toolCall({}), toolCall({})])],
+  ])("doesn't mark %s as repairable", (_, res) => {
+    const parsed = parseTriageResponse(res);
+    expect(parsed.ok).toBe(false);
+    expect(parsed).not.toHaveProperty("toolUseId");
   });
 });
+
+describe("buildRepairPrompt", () => {
+  it("appends the model's reply unchanged and an error tool result asking it to try again", () => {
+    const prompt = buildTriagePrompt({ title: "Badge", description: "Broken" }, new Date("2026-10-25T15:00:00Z"), "UTC");
+    const thinking: Anthropic.ThinkingBlock = { type: "thinking", thinking: "", signature: "sig" };
+    const rejected = { content: [thinking, toolCall({ ...VALID, summary: "x".repeat(150) })] };
+    const repair = buildRepairPrompt(prompt, rejected, "toolu_test", "invalid AI output: summary: must be 140 characters or fewer");
+
+    expect(repair.system).toBe(prompt.system);
+    expect(repair.tools).toEqual(prompt.tools);
+    expect(repair.messages.slice(0, 1)).toEqual(prompt.messages);
+    expect(repair.messages[1]).toEqual({ role: "assistant", content: rejected.content });
+    expect(repair.messages[2]).toEqual({
+      role: "user",
+      content: [
+        expect.objectContaining({
+          type: "tool_result",
+          tool_use_id: "toolu_test",
+          is_error: true,
+          content: expect.stringContaining("summary: must be 140 characters or fewer"),
+        }),
+      ],
+    });
+  });
+});
+
+describe("runTriage", () => {
+  const CONFIG: TriageConfig = { apiKey: "test-key", model: "claude-haiku-5-5", timeoutMs: 15_000 };
+  const INPUT = { title: "Renew the Zoom contract", description: "It expires on Wednesday." };
+  const TOO_LONG = { ...VALID, summary: "x".repeat(150) };
+
+  const message = (content: Anthropic.ContentBlock[], stop_reason: Anthropic.StopReason = "tool_use") =>
+    ({ content, stop_reason, stop_details: null }) as unknown as Anthropic.Message;
+
+  /**
+   * A fake model: each step takes `ms` on a fake clock, then returns a reply
+   * or throws. Records the timeout and prompt each call was given.
+   */
+  function fakeModel(steps: { ms: number; reply?: Anthropic.Message; throws?: unknown }[]) {
+    let clock = 1_000_000;
+    const calls: { timeoutMs: number; prompt: TriagePrompt }[] = [];
+    return {
+      calls,
+      deps: {
+        now: () => clock,
+        callModel: async (settings: { timeoutMs: number }, prompt: TriagePrompt) => {
+          const step = steps[calls.length];
+          calls.push({ timeoutMs: settings.timeoutMs, prompt });
+          clock += step.ms;
+          if (step.throws) throw step.throws;
+          return step.reply!;
+        },
+      },
+    };
+  }
+
+  it("fails with 'no API key configured' when there is no key, without calling the API", async () => {
+    const model = fakeModel([]);
+    const attempts = await runTriage(INPUT, { ...CONFIG, apiKey: undefined }, model.deps);
+    expect(attempts).toEqual([expect.objectContaining({ status: "failed", error: "no API key configured" })]);
+    expect(model.calls).toHaveLength(0);
+  });
+
+  it("makes one call when the first output is valid", async () => {
+    const model = fakeModel([{ ms: 2_000, reply: message([toolCall(VALID)]) }]);
+    const attempts = await runTriage(INPUT, CONFIG, model.deps);
+    expect(attempts).toEqual([expect.objectContaining({ status: "complete", suggestion: VALID })]);
+    expect(model.calls).toHaveLength(1);
+  });
+
+  it("asks the model to fix output that failed validation, and records both attempts", async () => {
+    const first = message([toolCall(TOO_LONG)]);
+    const model = fakeModel([
+      { ms: 3_000, reply: first },
+      { ms: 2_000, reply: message([toolCall(VALID)]) },
+    ]);
+    const attempts = await runTriage(INPUT, CONFIG, model.deps);
+
+    expect(attempts).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("summary: must be 140 characters or fewer"),
+      }),
+      expect.objectContaining({ status: "complete", suggestion: VALID }),
+    ]);
+    expect(attempts[1].finishedAt.getTime() - attempts[0].finishedAt.getTime()).toBe(2_000);
+    // The second call carries the rejected reply and an error tool result for it.
+    const retry = model.calls[1].prompt.messages;
+    expect(retry).toHaveLength(3);
+    expect(retry[1]).toEqual({ role: "assistant", content: first.content });
+    expect(retry[2].content).toEqual([
+      expect.objectContaining({ type: "tool_result", tool_use_id: "toolu_test", is_error: true }),
+    ]);
+  });
+
+  it("repairs only once, and never shortens the model's summary itself", async () => {
+    const model = fakeModel([
+      { ms: 3_000, reply: message([toolCall(TOO_LONG)]) },
+      { ms: 3_000, reply: message([toolCall(TOO_LONG)]) },
+    ]);
+    const attempts = await runTriage(INPUT, CONFIG, model.deps);
+    expect(attempts.map((a) => a.status)).toEqual(["failed", "failed"]);
+    expect(model.calls).toHaveLength(2);
+  });
+
+  it.each([
+    ["a timeout", { throws: new Anthropic.APIConnectionTimeoutError() }, "timed out after 15s"],
+    ["an API error", { throws: new Anthropic.APIConnectionError({ message: "down" }) }, "couldn't reach the Anthropic API"],
+    ["a refusal", { reply: message([], "refusal") }, "model declined"],
+    ["a reply with no tool call", { reply: message([{ type: "text", text: "Hardware.", citations: null }], "end_turn") }, "didn't call"],
+  ])("doesn't retry after %s", async (_, step, error) => {
+    const model = fakeModel([{ ms: 1_000, ...step }]);
+    const attempts = await runTriage(INPUT, CONFIG, model.deps);
+    expect(attempts).toEqual([expect.objectContaining({ status: "failed", error: expect.stringContaining(error) })]);
+    expect(model.calls).toHaveLength(1);
+  });
+
+  it("keeps the whole run under 30 seconds by shortening the repair call's timeout", async () => {
+    // The first call uses almost its full 15s, so the repair gets only what's left of the 28s budget.
+    const model = fakeModel([
+      { ms: 14_900, reply: message([toolCall(TOO_LONG)]) },
+      { ms: 1_000, reply: message([toolCall(VALID)]) },
+    ]);
+    await runTriage(INPUT, CONFIG, model.deps);
+    expect(model.calls.map((c) => c.timeoutMs)).toEqual([15_000, 28_000 - 14_900]);
+    expect(14_900 + model.calls[1].timeoutMs).toBeLessThan(30_000);
+  });
+
+  it("skips the repair when too little time is left for it", async () => {
+    const model = fakeModel([{ ms: 26_000, reply: message([toolCall(TOO_LONG)]) }]);
+    const attempts = await runTriage(INPUT, CONFIG, model.deps);
+    expect(attempts.map((a) => a.status)).toEqual(["failed"]);
+    expect(model.calls).toHaveLength(1);
+  });
+});
+

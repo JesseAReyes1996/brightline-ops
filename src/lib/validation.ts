@@ -1,14 +1,27 @@
 import { z } from "zod";
-import { CATEGORIES, CLOSE_REASONS, STATUSES, SUMMARY_MAX_LENGTH, UPDATE_NOTE_MAX_LENGTH, URGENCIES } from "./domain";
+import {
+  CATEGORIES,
+  CLOSE_REASONS,
+  DESCRIPTION_MAX_LENGTH,
+  STATUSES,
+  SUMMARY_MAX_LENGTH,
+  TITLE_MAX_LENGTH,
+  UPDATE_NOTE_MAX_LENGTH,
+  URGENCIES,
+} from "./domain";
 import { ServiceError } from "./errors";
 
 export const createRequestSchema = z.object({
-  title: z.string().trim().min(1, "Title is required").max(120, "Title must be 120 characters or fewer"),
+  title: z
+    .string()
+    .trim()
+    .min(1, "Title is required")
+    .max(TITLE_MAX_LENGTH, `Title must be ${TITLE_MAX_LENGTH} characters or fewer`),
   description: z
     .string()
     .trim()
     .min(1, "Description is required")
-    .max(5000, "Description must be 5000 characters or fewer"),
+    .max(DESCRIPTION_MAX_LENGTH, `Description must be ${DESCRIPTION_MAX_LENGTH} characters or fewer`),
   urgency: z.enum(URGENCIES),
 });
 export type CreateRequestInput = z.infer<typeof createRequestSchema>;
@@ -37,10 +50,12 @@ export const sessionSchema = z.object({
   userId: z.string().min(1, "userId is required"),
 });
 
-/** For the queue: no status means open requests only; "all" means every status. */
+/** For the queue: no status means open requests only, "all" means every status; no assignee means anyone. */
 export const listRequestsQuerySchema = z.object({
   view: z.enum(["mine", "queue"]).default("mine"),
   status: z.enum([...STATUSES, "all"]).optional(),
+  /** "unassigned", or a user id. No value means every assignee. */
+  assignee: z.string().min(1).optional(),
 });
 
 /**

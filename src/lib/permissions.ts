@@ -1,7 +1,7 @@
 import { CLOSE_REASONS, type CloseReason, type RequestActions, type Status, type TriageState, type User } from "./domain";
 import { availableTransitions, isTerminal } from "./transitions";
 
-// A triage attempt is pending for at most the model timeout (15s). One still
+// A triage run is pending for under 30s, its repair attempt included. One still
 // pending after a minute died mid-flight (say, the server restarted) and may be retried.
 const STALE_TRIAGE_MS = 60_000;
 

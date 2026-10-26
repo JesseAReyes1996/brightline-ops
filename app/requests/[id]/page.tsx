@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   CATEGORIES,
   CATEGORY_LABELS,
@@ -25,6 +25,7 @@ import {
 import { isOps } from "@/src/lib/permissions";
 import { isTerminal } from "@/src/lib/transitions";
 import { api, errorMessage, useApi } from "../../_components/api";
+import { CharCount, OverLimitMessage, overLimitBy } from "../../_components/CharLimit";
 import { describeEvent, formatDateTime, StatusBadge } from "../../_components/format";
 import { useSession } from "../../_components/session";
 import { UserGate } from "../../_components/UserGate";
@@ -328,10 +329,13 @@ function TriageEditor({
   const [urgency, setUrgency] = useState<Urgency | "">(start?.urgency ?? "");
   const [summary, setSummary] = useState(start?.summary ?? "");
 
-  const values = category && urgency && summary.trim() ? { category, urgency, summary: summary.trim() } : null;
+  const summaryOver = overLimitBy(summary, SUMMARY_MAX_LENGTH) > 0;
+  const values =
+    category && urgency && summary.trim() && !summaryOver ? { category, urgency, summary: summary.trim() } : null;
   // Re-saving the values already in place would change nothing, so it's disabled.
   const unchanged = values !== null && current !== null && TRIAGE_FIELDS.every((f) => values[f] === current[f]);
   const changed = (field: TriageField, value: string) => suggestion !== null && value !== "" && suggestion[field] !== value;
+  const summaryErrorId = `${useId()}-summary`;
 
   return (
     <form
@@ -374,18 +378,18 @@ function TriageEditor({
       <label>
         <span className="label-row">
           <span>Summary {changed("summary", summary.trim()) && <ChangedTag />}</span>
-          <span className="muted small">
-            {summary.length}/{SUMMARY_MAX_LENGTH}
-          </span>
+          <CharCount value={summary} max={SUMMARY_MAX_LENGTH} />
         </span>
         <textarea
           aria-label="Final summary"
           rows={2}
           value={summary}
-          maxLength={SUMMARY_MAX_LENGTH}
+          aria-invalid={summaryOver}
+          aria-describedby={summaryOver ? summaryErrorId : undefined}
           // The summary must be one line, so line breaks (typed or pasted) become spaces.
           onChange={(e) => setSummary(e.target.value.replace(/[\r\n]+/g, " "))}
         />
+        <OverLimitMessage id={summaryErrorId} value={summary} max={SUMMARY_MAX_LENGTH} field="The summary" />
       </label>
       <p className="row">
         <button type="submit" disabled={busy || !values || unchanged}>
@@ -549,32 +553,34 @@ function StatusControls({
 /** For the requester while Ops waits on them: their update, which goes into the history. */
 function SendBackForm({ busy, onSend }: { busy: boolean; onSend: (note: string) => void }) {
   const [note, setNote] = useState("");
+  const errorId = `${useId()}-note`;
+  const over = overLimitBy(note, UPDATE_NOTE_MAX_LENGTH) > 0;
   return (
     <form
       className="stack"
       onSubmit={(e) => {
         e.preventDefault();
-        if (note.trim()) onSend(note.trim());
+        if (note.trim() && !over) onSend(note.trim());
       }}
     >
       <p className="muted">The Ops team is waiting on you. Reply here to send the request back to them.</p>
       <label>
         <span className="label-row">
           <span>What&apos;s your update?</span>
-          <span className="muted small">
-            {note.length}/{UPDATE_NOTE_MAX_LENGTH}
-          </span>
+          <CharCount value={note} max={UPDATE_NOTE_MAX_LENGTH} />
         </span>
         <textarea
           rows={4}
           value={note}
-          maxLength={UPDATE_NOTE_MAX_LENGTH}
           required
+          aria-invalid={over}
+          aria-describedby={over ? errorId : undefined}
           onChange={(e) => setNote(e.target.value)}
         />
+        <OverLimitMessage id={errorId} value={note} max={UPDATE_NOTE_MAX_LENGTH} field="Your update" />
       </label>
       <p>
-        <button type="submit" disabled={busy || !note.trim()}>
+        <button type="submit" disabled={busy || !note.trim() || over}>
           Send back to Ops
         </button>
       </p>

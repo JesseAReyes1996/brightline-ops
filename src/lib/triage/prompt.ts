@@ -5,6 +5,8 @@ export const TRIAGE_TOOL_NAME = "record_triage";
 
 // `strict: true` makes the API enforce this schema, enums included. The
 // result is still validated with zod in parse.ts; that check is ours to own.
+// Strict schemas don't support `maxLength` (the API returns a 400 for it), so
+// the summary's length limit lives in its description and in parse.ts.
 const TRIAGE_TOOL: Anthropic.Tool = {
   name: TRIAGE_TOOL_NAME,
   description: "Record the triage classification for one request sent to the Brightline Ops team.",
@@ -16,7 +18,8 @@ const TRIAGE_TOOL: Anthropic.Tool = {
       urgency: { type: "string", enum: [...URGENCIES], description: "How soon Ops needs to act." },
       summary: {
         type: "string",
-        description: "One sentence of at most 140 characters saying what is needed. No line breaks.",
+        description:
+          "One sentence saying what is needed. Aim for 120 characters or fewer; never more than 140. No line breaks.",
       },
     },
     required: ["category", "urgency", "summary"],
@@ -39,7 +42,7 @@ Urgency:
 - medium: needed soon, but there is a workaround or the deadline is weeks away.
 - low: nice to have, with no deadline.
 
-Summary: one plain sentence of at most 140 characters saying what is needed.
+Summary: one plain sentence saying what is needed. Aim for 120 characters or fewer; it must never be more than 140.
 
 The user message starts with today's date. Use it to work out how close any deadline or date in the request is.
 
@@ -90,6 +93,38 @@ export function buildTriagePrompt(
         role: "user",
         // The date goes here rather than in the system prompt, which stays the same on every call.
         content: `Today is ${formatPromptDate(now, timeZone)}.\n\nClassify this request.\n\n<request_title>\n${title}\n</request_title>\n\n<request_description>\n${description}\n</request_description>`,
+      },
+    ],
+  };
+}
+
+/**
+ * The follow-up when the model's record_triage call failed validation: the
+ * original conversation, the model's reply exactly as returned (thinking
+ * blocks included, which the API requires), and an error tool result asking
+ * it to call the tool again. Pure, like buildTriagePrompt.
+ */
+export function buildRepairPrompt(
+  prompt: TriagePrompt,
+  rejected: Pick<Anthropic.Message, "content">,
+  toolUseId: string,
+  error: string,
+): TriagePrompt {
+  return {
+    ...prompt,
+    messages: [
+      ...prompt.messages,
+      { role: "assistant", content: rejected.content },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: toolUseId,
+            is_error: true,
+            content: `Your ${TRIAGE_TOOL_NAME} call was rejected: ${error}. Call ${TRIAGE_TOOL_NAME} again with corrected values. The summary must be one line of at most 140 characters; aim for 120 or fewer.`,
+          },
+        ],
       },
     ],
   };

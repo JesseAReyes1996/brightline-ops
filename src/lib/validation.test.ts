@@ -39,3 +39,17 @@ describe("listRequestsQuerySchema status", () => {
     expect(() => parseInput(listRequestsQuerySchema, { view: "queue", status: "open" })).toThrow(ServiceError);
   });
 });
+
+describe("listRequestsQuerySchema assignee", () => {
+  it("accepts 'unassigned' or a user id, alongside a status", () => {
+    expect(parseInput(listRequestsQuerySchema, { view: "queue", assignee: "unassigned", status: "done" })).toMatchObject({
+      assignee: "unassigned",
+      status: "done",
+    });
+    expect(parseInput(listRequestsQuerySchema, { view: "queue", assignee: "marcus" }).assignee).toBe("marcus");
+  });
+
+  it("means everyone when left out", () => {
+    expect(parseInput(listRequestsQuerySchema, { view: "queue" }).assignee).toBeUndefined();
+  });
+});

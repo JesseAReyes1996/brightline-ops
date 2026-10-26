@@ -1,9 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
-import { CATEGORY_LABELS, URGENCIES, URGENCY_LABELS, type RequestView, type Urgency } from "@/src/lib/domain";
+import { useId, useState, type FormEvent } from "react";
+import {
+  CATEGORY_LABELS,
+  DESCRIPTION_MAX_LENGTH,
+  TITLE_MAX_LENGTH,
+  URGENCIES,
+  URGENCY_LABELS,
+  type RequestView,
+  type Urgency,
+} from "@/src/lib/domain";
 import { api, errorMessage } from "./_components/api";
+import { CharCount, OverLimitMessage, overLimitBy } from "./_components/CharLimit";
 import { UserGate } from "./_components/UserGate";
 
 export default function SubmitPage() {
@@ -23,9 +32,13 @@ function SubmitForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<RequestView | null>(null);
+  const ids = useId();
+  const titleOver = overLimitBy(title, TITLE_MAX_LENGTH) > 0;
+  const descriptionOver = overLimitBy(description, DESCRIPTION_MAX_LENGTH) > 0;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (titleOver || descriptionOver) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -56,12 +69,38 @@ function SubmitForm() {
       )}
       {error && <p className="error">{error}</p>}
       <label>
-        Title
-        <input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={120} />
+        <span className="label-row">
+          <span>Title</span>
+          <CharCount value={title} max={TITLE_MAX_LENGTH} />
+        </span>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          required
+          aria-invalid={titleOver}
+          aria-describedby={titleOver ? `${ids}-title` : undefined}
+        />
+        <OverLimitMessage id={`${ids}-title`} value={title} max={TITLE_MAX_LENGTH} field="Title" />
       </label>
       <label>
-        Description
-        <textarea value={description} onChange={(e) => setDescription(e.target.value)} required maxLength={5000} rows={6} />
+        <span className="label-row">
+          <span>Description</span>
+          <CharCount value={description} max={DESCRIPTION_MAX_LENGTH} />
+        </span>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          required
+          rows={6}
+          aria-invalid={descriptionOver}
+          aria-describedby={descriptionOver ? `${ids}-description` : undefined}
+        />
+        <OverLimitMessage
+          id={`${ids}-description`}
+          value={description}
+          max={DESCRIPTION_MAX_LENGTH}
+          field="Description"
+        />
       </label>
       <label>
         How urgent is it?
@@ -77,7 +116,7 @@ function SubmitForm() {
         </select>
       </label>
       <div>
-        <button type="submit" disabled={submitting}>
+        <button type="submit" disabled={submitting || titleOver || descriptionOver}>
           {submitting ? "Submitting and running AI triage…" : "Submit request"}
         </button>
       </div>

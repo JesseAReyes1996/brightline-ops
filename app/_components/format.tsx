@@ -56,10 +56,18 @@ export function describeEvent(event: HistoryEvent<string>, userName: (id: string
       const reason = event.detail?.closeReason ? ` (${CLOSE_REASON_LABELS[event.detail.closeReason]})` : "";
       return `${actor} moved it from ${from} to ${to}${reason}`;
     }
-    case "triage_completed":
-      return `AI triage completed (${event.detail?.model ?? "unknown model"})`;
-    case "triage_failed":
-      return `AI triage failed: ${event.detail?.error ?? "unknown error"}`;
+    case "triage_completed": {
+      const model = event.detail?.model ?? "unknown model";
+      return event.detail?.attempt
+        ? `AI triage completed on attempt ${event.detail.attempt} (${model})`
+        : `AI triage completed (${model})`;
+    }
+    case "triage_failed": {
+      const error = event.detail?.error ?? "unknown error";
+      return event.detail?.attempt
+        ? `AI triage attempt ${event.detail.attempt} failed: ${error}`
+        : `AI triage failed: ${error}`;
+    }
     case "triage_accepted":
       return `${actor} accepted the AI triage`;
     case "triage_overridden":

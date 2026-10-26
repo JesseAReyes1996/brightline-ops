@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { TriagePrompt } from "./prompt";
 
-interface TriageModelSettings {
+export interface TriageModelSettings {
   apiKey: string;
   model: string;
   timeoutMs: number;

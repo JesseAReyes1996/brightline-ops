@@ -31,11 +31,14 @@ export default function OpsQueuePage() {
 
 function Queue({ me }: { me: User }) {
   const { users, userName } = useSession();
-  // "" is the default: open requests only.
+  // "" is the default for both: open requests, anyone's.
   const [status, setStatus] = useState<Status | "all" | "">("");
-  const { data, error, loading, reload } = useApi<{ requests: RequestView[] }>(
-    `/api/requests?view=queue${status ? `&status=${status}` : ""}`,
-  );
+  // "unassigned", "me", or a user id. "me" is its own option so it stays selected as "Me".
+  const [assignee, setAssignee] = useState("");
+  const params = new URLSearchParams({ view: "queue" });
+  if (status) params.set("status", status);
+  if (assignee) params.set("assignee", assignee === "me" ? me.id : assignee);
+  const { data, error, loading, reload } = useApi<{ requests: RequestView[] }>(`/api/requests?${params}`);
   const [actionError, setActionError] = useState<string | null>(null);
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const opsTeam = users.filter(isOps);
@@ -54,7 +57,7 @@ function Queue({ me }: { me: User }) {
 
   return (
     <>
-      <p>
+      <p className="row">
         <label>
           Status{" "}
           <select value={status} onChange={(e) => setStatus(e.target.value as Status | "all" | "")}>
@@ -66,7 +69,20 @@ function Queue({ me }: { me: User }) {
             ))}
             <option value="all">All</option>
           </select>
-        </label>{" "}
+        </label>
+        <label>
+          Assignee{" "}
+          <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+            <option value="">All</option>
+            <option value="unassigned">Unassigned</option>
+            <option value="me">Me</option>
+            {opsTeam.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+        </label>
         {loading && <span className="muted">Loading…</span>}
       </p>
       {error && <p className="error">{error}</p>}

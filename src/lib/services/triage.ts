@@ -20,9 +20,10 @@ const NOT_YOURS = "Only the assignee or the Ops Lead can change this request.";
 
 /**
  * Runs triage for a request whose triage is already marked pending with
- * `attemptedAt`, then stores the outcome and its history event in one
- * `updateOne`. `actorId` is whoever triggered it: the submitter, or the Ops
- * member who retried.
+ * `attemptedAt`, then stores the outcome and a history event per attempt in
+ * one `updateOne`. When the model was asked to fix rejected output, both
+ * attempts are recorded, numbered. `actorId` is whoever triggered it: the
+ * submitter, or the Ops member who retried.
  */
 export async function runAndRecordTriage(
   db: Db,
@@ -32,22 +33,24 @@ export async function runAndRecordTriage(
   actorId: string,
   config: TriageConfig,
 ): Promise<void> {
-  const result = await runTriage(input, config);
-  const now = new Date();
+  const attempts = await runTriage(input, config);
+  const final = attempts[attempts.length - 1];
   const triage: TriageState =
-    result.status === "complete"
-      ? { status: "complete", suggestion: result.suggestion, model: config.model, error: null, attemptedAt }
-      : { status: "failed", suggestion: null, model: config.model, error: result.error, attemptedAt };
-  const event: HistoryEvent =
-    result.status === "complete"
-      ? { type: "triage_completed", at: now, actorId, detail: { model: config.model } }
-      : { type: "triage_failed", at: now, actorId, detail: { error: result.error } };
+    final.status === "complete"
+      ? { status: "complete", suggestion: final.suggestion, model: config.model, error: null, attemptedAt }
+      : { status: "failed", suggestion: null, model: config.model, error: final.error, attemptedAt };
+  const events: HistoryEvent[] = attempts.map((a, i) => {
+    const numbered = attempts.length > 1 ? { attempt: i + 1 } : {};
+    return a.status === "complete"
+      ? { type: "triage_completed", at: a.finishedAt, actorId, detail: { model: config.model, ...numbered } }
+      : { type: "triage_failed", at: a.finishedAt, actorId, detail: { error: a.error, ...numbered } };
+  });
 
-  // Matching on attemptedAt means only the latest attempt is recorded: if a
+  // Matching on attemptedAt means only the latest triage run is recorded: if a
   // newer retry started while this one ran, this result is dropped.
   await requestsCollection(db).updateOne(
     { _id: requestId, "triage.attemptedAt": attemptedAt },
-    { $set: { triage, updatedAt: now }, $push: { history: event } },
+    { $set: { triage, updatedAt: final.finishedAt }, $push: { history: { $each: events } } },
   );
 }
 

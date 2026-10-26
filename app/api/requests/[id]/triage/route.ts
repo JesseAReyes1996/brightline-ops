@@ -4,7 +4,7 @@ import { retryTriage } from "@/src/lib/services/triage";
 import { triageConfigFromEnv } from "@/src/lib/triage";
 import { handle, requireUser } from "@/app/api/_lib/http";
 
-// Waits on AI triage (up to its 15s timeout); see app/api/requests/route.ts.
+// Waits on AI triage (under 30s with its repair attempt); see app/api/requests/route.ts.
 export const maxDuration = 60;
 
 /**

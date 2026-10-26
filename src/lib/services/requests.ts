@@ -6,6 +6,7 @@ import { canAssign, canChangeStatus, isOps, sendBackNeedsUpdate } from "../permi
 import { checkTransition, isTerminal } from "../transitions";
 import type { TriageConfig } from "../triage";
 import type { AssignInput, CreateRequestInput, StatusChangeInput } from "../validation";
+import { redactForViewer } from "../redact";
 import { getRequestDetail, loadRequest, toRequestView } from "./queries";
 import { runAndRecordTriage } from "./triage";
 import { findUser } from "./users";
@@ -49,7 +50,8 @@ export async function createRequest(
     console.error(`[triage] Couldn't record triage for request ${doc._id.toHexString()}:`, err);
   }
   const saved = await requests.findOne({ _id: doc._id }).catch(() => null);
-  return toRequestView(saved ?? doc);
+  // The submitter may be a requester, who mustn't see a triage failure.
+  return redactForViewer(actor, toRequestView(saved ?? doc));
 }
 
 export async function assignRequest(db: Db, actor: User, id: string, input: AssignInput): Promise<RequestDetail> {

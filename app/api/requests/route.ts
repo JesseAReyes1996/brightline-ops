@@ -6,23 +6,26 @@ import { triageConfigFromEnv } from "@/src/lib/triage";
 import { createRequestSchema, listRequestsQuerySchema, parseInput } from "@/src/lib/validation";
 import { handle, readJson, requireUser } from "@/app/api/_lib/http";
 
-// POST waits on AI triage (up to its 15s timeout) plus database work and a
-// possible cold start. 60s leaves ample room and is allowed on every Vercel plan.
+// POST waits on AI triage (under 30s, including its one repair attempt) plus
+// database work and a possible cold start. 60s leaves room and is allowed on
+// every Vercel plan.
 export const maxDuration = 60;
 
-/** `?view=mine` (default): your own requests. `?view=queue[&status=…]`: the Ops queue. */
+/** `?view=mine` (default): your own requests. `?view=queue[&status=…][&assignee=…]`: the Ops queue. */
 export async function GET(req: NextRequest) {
   return handle(async () => {
     const db = await getDb();
     const actor = await requireUser(req, db);
     const query = parseInput(listRequestsQuerySchema, Object.fromEntries(req.nextUrl.searchParams));
     const requests =
-      query.view === "queue" ? await listQueue(db, actor, { status: query.status }) : await listMyRequests(db, actor);
+      query.view === "queue"
+        ? await listQueue(db, actor, { status: query.status, assignee: query.assignee })
+        : await listMyRequests(db, actor);
     return NextResponse.json({ requests });
   });
 }
 
-/** Saves the request, runs AI triage (up to ~15s), and returns the request either way. */
+/** Saves the request, runs AI triage (under 30s), and returns the request either way. */
 export async function POST(req: NextRequest) {
   return handle(async () => {
     const db = await getDb();
