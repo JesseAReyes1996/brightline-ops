@@ -71,6 +71,8 @@ export function describeEvent(event: HistoryEvent<string>, userName: (id: string
     case "triage_accepted":
       return `${actor} accepted the AI triage`;
     case "triage_overridden":
+      // No AI suggestion means there was nothing to override.
+      if (event.detail?.noSuggestion) return `${actor} triaged it by hand`;
       return `${actor} overrode the AI triage (${event.detail?.overriddenFields?.join(", ") ?? "fields not recorded"})`;
   }
 }

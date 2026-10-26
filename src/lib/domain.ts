@@ -119,6 +119,32 @@ export interface HistoryEvent<D = Date> {
     note?: string;
     /** On triage events, which attempt this was when the first output was rejected and the model was asked to fix it. */
     attempt?: number;
+    /** On triage_overridden: there was no AI suggestion, so Ops triaged it by hand. */
+    noSuggestion?: true;
+  };
+}
+
+/**
+ * The history event for Ops setting the final triage. Values identical to the
+ * AI suggestion are a triage_accepted event; any difference is a
+ * triage_overridden event listing the fields changed. With no suggestion
+ * (triage failed or is pending) every field counts as overridden and the event
+ * is flagged noSuggestion, so the history can say it was triaged by hand; the
+ * event type stays the same, so the metrics don't change.
+ */
+export function triageReviewEvent(
+  suggestion: TriageValues | null,
+  final: TriageValues,
+  actorId: string,
+  at: Date,
+): HistoryEvent {
+  const overriddenFields = overriddenTriageFields(suggestion, final);
+  if (overriddenFields.length === 0) return { type: "triage_accepted", at, actorId };
+  return {
+    type: "triage_overridden",
+    at,
+    actorId,
+    detail: suggestion ? { overriddenFields } : { overriddenFields, noSuggestion: true },
   };
 }
 

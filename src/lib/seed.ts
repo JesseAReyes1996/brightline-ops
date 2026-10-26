@@ -1,7 +1,7 @@
 import { ObjectId, type Db } from "mongodb";
 import { requestsCollection, usersCollection, type RequestDoc, type UserDoc } from "./collections";
 import {
-  overriddenTriageFields,
+  triageReviewEvent,
   type CloseReason,
   type HistoryEvent,
   type Status,
@@ -439,14 +439,7 @@ function seedRequest(input: SeedInput): RequestDoc {
       : { type: "triage_failed", at: triagedAt, actorId: requesterId, detail: { error: failure } },
     ...(input.events ?? []),
   ];
-  if (accepted && reviewed) {
-    const overriddenFields = overriddenTriageFields(suggestion, accepted);
-    history.push(
-      overriddenFields.length === 0
-        ? { type: "triage_accepted", at: reviewed.at, actorId: reviewed.by }
-        : { type: "triage_overridden", at: reviewed.at, actorId: reviewed.by, detail: { overriddenFields } },
-    );
-  }
+  if (accepted && reviewed) history.push(triageReviewEvent(suggestion, accepted, reviewed.by, reviewed.at));
   // The review was appended last; a stable sort puts it in time order.
   history.sort((a, b) => a.at.getTime() - b.at.getTime());
 

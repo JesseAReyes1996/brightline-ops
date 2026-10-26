@@ -3,7 +3,7 @@ import { requestsCollection } from "../collections";
 import {
   STATUS_LABELS,
   TRIAGE_FIELDS,
-  overriddenTriageFields,
+  triageReviewEvent,
   type HistoryEvent,
   type RequestDetail,
   type TriageState,
@@ -93,10 +93,9 @@ export async function retryTriage(db: Db, actor: User, id: string, config: Triag
 }
 
 /**
- * Stores the final triage values Ops set. Values identical to the AI suggestion are a
- * `triage_accepted` event; any difference is a `triage_overridden` event that
- * lists the fields changed. With no suggestion (triage failed or is pending),
- * every field counts as overridden.
+ * Stores the final triage values Ops set, with the history event from
+ * triageReviewEvent: accepted, overridden, or (with no AI suggestion)
+ * overridden and flagged as triaged by hand.
  */
 export async function setAcceptedTriage(
   db: Db,
@@ -119,12 +118,8 @@ export async function setAcceptedTriage(
     throw new ServiceError("invalid_input", "These are already the final triage values.");
   }
 
-  const overriddenFields = overriddenTriageFields(triage.suggestion, values);
   const now = new Date();
-  const event: HistoryEvent =
-    overriddenFields.length === 0
-      ? { type: "triage_accepted", at: now, actorId: actor.id }
-      : { type: "triage_overridden", at: now, actorId: actor.id, detail: { overriddenFields } };
+  const event = triageReviewEvent(triage.suggestion, values, actor.id, now);
 
   // Same guard as status changes: if the status or assignee changed since the
   // permission check, nothing matches and the caller gets a conflict.
