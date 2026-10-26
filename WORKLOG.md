@@ -172,5 +172,4 @@ Also my thinking on metrics that Priya requested was that we'd give Priya some b
 
 The rest of that last summary (items 1–4, the test counts, and the build results) stands and matches the tool output above."
 
-7:21 PM ok true final wrap up. I am stopping here. There is still more to be done but the core workflow is tested and passing. I am proud of this. When things are open ended like this I tend to keep going and going which is why it's so important to have concrete SOWs written about exactly what it is that will be delivered. Going to reseed and do one final by hand test before taking a break and submitting. 
-
+7:21 PM ok true final wrap up. I am stopping here. There is still more to be done but the core workflow is tested and passing. I am proud of this. When things are open ended like this I tend to keep going and going which is why it's so important to have concrete SOWs written about exactly what it is that will be delivered. Going to reseed and do one final by hand test before taking a break and submitting.
